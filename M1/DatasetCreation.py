@@ -20,13 +20,8 @@ hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_c
 DATASET_DIR = "data"
 os.makedirs(DATASET_DIR, exist_ok=True)  # Create directory if it does not exist
 
-# Check if dataset file exists; if not, create it with a header
+# Define the dataset file path
 DATASET_FILE = os.path.join(DATASET_DIR, "dataset.csv")
-if not os.path.exists(DATASET_FILE):
-    with open(DATASET_FILE, mode='w', newline='') as csv_file:
-        csv_writer = csv.writer(csv_file)
-        header = ["gesture_label"] + [f"x{i}, y{i}, z{i}" for i in range(1, 22)]
-        csv_writer.writerow(header)
 
 
 def collect_gesture_data(gesture_label, num_samples=500):
