@@ -1,2 +1,55 @@
 # Virtual Environment
 GHID_env/
+venv/
+.env/
+*.venv
+
+# Python Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dataset & Temporary Data
+data/
+gesture_dataset/
+*.csv  # Ignore dataset files
+*.json
+*.h5
+*.npy
+*.pkl  # Pickle files
+
+# Trained Models & Checkpoints
+models/
+*.pth
+*.pt
+*.onnx
+*.hdf5
+*.tflite
+
+# TensorBoard Logs
+runs/
+logs/
+events.out.tfevents.*
+
+# PyTorch Lightning & Debug Logs
+lightning_logs/
+*.log
+debug.log
+
+# Build Artifacts
+dist/
+build/
+*.so
+*.o
+*.a
+*.dll
+*.dylib
+*.exe
+
+# Editor & OS-Specific Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
