@@ -36,10 +36,13 @@ while cap.isOpened():
     # 4. Process the frame with MediaPipe Hands
     results = hands.process(rgb_frame)
 
-    # 5. If hands are detected, overlay the landmarks on the frame
+    # 5. If hands are detected, overlay the landmarks on the frame and print the main coordinates
     if results.multi_hand_landmarks:
+        # For each hand detected
         for hand_landmarks in results.multi_hand_landmarks:
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)  # Draw the landmarks
+            thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]  # Get the thumb tip coordinates
+            print(f"Thumb Tip Coordinates: x={thumb_tip.x}, y={thumb_tip.y}, z={thumb_tip.z}")  # Print the thumb tip coordinates
 
     # 6. Display the frame
     cv2.imshow('MediaPipe Hands Demo', frame)
