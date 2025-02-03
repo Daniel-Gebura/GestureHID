@@ -26,27 +26,27 @@ model.eval()  # Set model to evaluation mode
 # Start the webcam
 cap = cv2.VideoCapture(1)
 
+# Main Loop
 while cap.isOpened():
+    # 1. Read the frame from the webcam
     ret, frame = cap.read()
     if not ret:
         print("Ignoring empty camera frame.")
         continue
 
-    # Flip the frame horizontally for selfie-view
+    # 2. Preprocess the frame (flip horizontally and convert to RGB)
     frame = cv2.flip(frame, 1)
-    
-    # Convert the frame from BGR to RGB
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Process frame with MediaPipe Hands
+    # 3. Process frame with MediaPipe Hands
     results = hands.process(rgb_frame)
 
-    # Default prediction
+    # 4. Set default prediction
     gesture = "None"
 
-    # If hands are detected, process landmarks
+    # 5. If hands are detected, process landmarks
     if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:  # For each hand detected
             # Draw landmarks on the frame
             mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
@@ -61,16 +61,14 @@ while cap.isOpened():
             # Make prediction
             with torch.no_grad():
                 output = model(landmarks_tensor)
-                prediction = (output > 0.5).float().item()  # Binary classification
+                prediction = (output > 0.5).float().item()  # Binary classification with threshold 0.5
 
             # Map prediction to gesture label
             gesture = "Closed Fist" if prediction == 1 else "None"
 
-    # Display classification result
+    # 6. Display classification result
     cv2.putText(frame, f"Gesture: {gesture}", (10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-    # Show frame
     cv2.imshow("Hand Gesture Classification", frame)
 
     # Exit on 'q' key press
