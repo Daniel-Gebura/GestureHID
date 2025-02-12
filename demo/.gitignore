@@ -18,14 +18,6 @@ gesture_dataset/
 *.npy
 *.pkl  # Pickle files
 
-# Trained Models & Checkpoints
-models/
-*.pth
-*.pt
-*.onnx
-*.hdf5
-*.tflite
-
 # TensorBoard Logs
 runs/
 logs/

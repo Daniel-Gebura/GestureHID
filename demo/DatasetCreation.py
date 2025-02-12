@@ -21,7 +21,7 @@ DATASET_DIR = "data"
 os.makedirs(DATASET_DIR, exist_ok=True)  # Create directory if it does not exist
 
 # Define the dataset file path
-DATASET_FILE = os.path.join(DATASET_DIR, "dataset.csv")
+DATASET_FILE = os.path.join(DATASET_DIR, "dataset_new.csv")
 
 
 def collect_gesture_data(gesture_label, num_samples=500):
