@@ -21,7 +21,7 @@ LEARNING_RATE = 0.001
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load the dataset
-train_loader, val_loader = get_data_loaders("../data/right_dataset_v1.csv", batch_size=BATCH_SIZE)
+train_loader, val_loader = get_data_loaders("../data/left_dataset_v1.csv", batch_size=BATCH_SIZE)
 
 # Initialize the model
 model = GestureClassifier(output_size=6).to(DEVICE)  # 6 defined classes
@@ -29,7 +29,7 @@ criterion = nn.CrossEntropyLoss()  # Loss = Cross-Entropy for multi-class classi
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)  # Optimizer = Adam
 
 # Initialize TensorBoard
-writer = SummaryWriter("../runs/right_multiclass_gesture_classifier")
+writer = SummaryWriter("../runs/left_multiclass_gesture_classifier")
 
 # Training/Validation loop
 for epoch in range(EPOCHS):
@@ -101,5 +101,5 @@ for epoch in range(EPOCHS):
     print(f"Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.4f}")
 
 # Save the trained model
-torch.save(model.state_dict(), "../models/right_multiclass_gesture_classifier.pth")
+torch.save(model.state_dict(), "../models/left_multiclass_gesture_classifier.pth")
 writer.close()
