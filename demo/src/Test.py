@@ -2,7 +2,7 @@
 # Test.py
 #
 # Description: Uses MediaPipe Hands to detect hand landmarks and classifies
-# the gesture in real-time using a trained PyTorch model.
+# the gesture in real-time using trained PyTorch models for both left and right hands.
 # Applies the same normalization used during training.
 #
 # Author: Daniel Gebura, djg2170
@@ -14,8 +14,9 @@ import torch
 import numpy as np
 from Model import GestureClassifier
 
-# Define gesture labels (matching the dataset)
-GESTURE_LABELS = ["closed_fist", "open_hand", "thumbs_up", "index_thumb", "pinky_thumb", "thumbs_down"]
+# Define gesture labels for right/left hand separately
+R_GESTURE_LABELS = ["closed_fist", "open_hand", "thumbs_up", "index_thumb", "pinky_thumb", "thumbs_down"]
+L_GESTURE_LABELS = ["forward_point", "back_point", "left_point", "right_point", "open_hand", "index_thumb"]
 
 # Confidence threshold for classification
 CONFIDENCE_THRESHOLD = 0.3  # HYPERPARAMETER TO ADJUST
@@ -23,13 +24,18 @@ CONFIDENCE_THRESHOLD = 0.3  # HYPERPARAMETER TO ADJUST
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.5)
+hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)  # Detect up to 2 hands
 
-# Load the trained PyTorch model
+# Load the trained PyTorch models for right and left hand
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = GestureClassifier(output_size=len(GESTURE_LABELS)).to(DEVICE)
-model.load_state_dict(torch.load("../models/right_multiclass_gesture_classifier.pth", map_location=DEVICE))
-model.eval()  # Set model to evaluation mode
+
+right_model = GestureClassifier(output_size=len(R_GESTURE_LABELS)).to(DEVICE)
+right_model.load_state_dict(torch.load("../models/right_multiclass_gesture_classifier.pth", map_location=DEVICE))
+right_model.eval()  # Set model to evaluation mode
+
+left_model = GestureClassifier(output_size=len(L_GESTURE_LABELS)).to(DEVICE)
+left_model.load_state_dict(torch.load("../models/left_multiclass_gesture_classifier.pth", map_location=DEVICE))
+left_model.eval()  # Set model to evaluation mode
 
 def normalize_landmarks(landmarks):
     """
@@ -80,42 +86,65 @@ while cap.isOpened():
     # 3. Process frame with MediaPipe Hands
     results = hands.process(rgb_frame)
 
-    # 4. Set default prediction
-    gesture = "None"
+    # 4. If no hands are detected, reset both gestures and continue
+    if not results.multi_hand_landmarks:
+        right_gesture, left_gesture = "None", "None"
+        continue  # Skip processing and move to the next frame
 
-    # 5. If hands are detected, process landmarks
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:  # For each hand detected
-            # Draw landmarks on the frame
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+    # 5. Process detected hands
+    detected_hands = {"Right": False, "Left": False}  # Track detected hands
 
-            # Extract landmark coordinates
-            landmarks = []
-            for lm in hand_landmarks.landmark:
-                landmarks.extend([lm.x, lm.y, lm.z])  # Flatten into a 63-dimensional vector
+    for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):  # For each hand detected
+        handedness = results.multi_handedness[idx].classification[0].label  # check "Left" or "Right" hand
+        detected_hands[handedness] = True  # Mark the detected hand as found
 
-            # Normalize using the same approach as training
-            landmarks = normalize_landmarks(landmarks)
+        # Draw landmarks on the frame
+        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-            # Convert to PyTorch tensor
-            landmarks_tensor = torch.tensor(landmarks, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+        # Extract landmark coordinates
+        landmarks = []
+        for lm in hand_landmarks.landmark:
+            landmarks.extend([lm.x, lm.y, lm.z])  # Flatten into a 63-dimensional vector
 
-            # Make prediction
-            with torch.no_grad():
-                output = model(landmarks_tensor)  # Get class probabilities
-                probabilities = torch.softmax(output, dim=1).cpu().numpy()[0]  # Convert to NumPy array
-                predicted_class = np.argmax(probabilities)  # Get class with highest probability
-                confidence = probabilities[predicted_class]  # Get confidence score
+        # Normalize coordinates (translation/scale invariance)
+        landmarks = normalize_landmarks(landmarks)
 
-            # Apply confidence threshold
-            if confidence >= CONFIDENCE_THRESHOLD:
-                gesture = GESTURE_LABELS[predicted_class]  # Assign predicted gesture
-            else:
-                gesture = "None"  # Low confidence, default to "None"
+        # Convert to PyTorch tensor
+        landmarks_tensor = torch.tensor(landmarks, dtype=torch.float32).unsqueeze(0).to(DEVICE)
 
-    # 6. Display classification result
-    cv2.putText(frame, f"Gesture: {gesture}", (10, 50),
+        # Make prediction based on hand type
+        with torch.no_grad():
+            if handedness == "Right":
+                output = right_model(landmarks_tensor)  # Get class probabilities
+                probabilities = torch.softmax(output, dim=1)[0]  # Directly get tensor
+                predicted_class = torch.argmax(probabilities).item()
+                confidence = probabilities[predicted_class].item()
+
+                # Apply confidence threshold
+                if confidence >= CONFIDENCE_THRESHOLD:
+                    right_gesture = R_GESTURE_LABELS[predicted_class]
+
+            elif handedness == "Left":
+                output = left_model(landmarks_tensor)  # Get class probabilities
+                probabilities = torch.softmax(output, dim=1)[0]  # Directly get tensor
+                predicted_class = torch.argmax(probabilities).item()
+                confidence = probabilities[predicted_class].item()
+
+                # Apply confidence threshold
+                if confidence >= CONFIDENCE_THRESHOLD:
+                    left_gesture = L_GESTURE_LABELS[predicted_class]
+
+    # 6. If a hand was **not detected**, reset only that hand's gesture
+    if not detected_hands["Right"]:
+        right_gesture = "None"
+    if not detected_hands["Left"]:
+        left_gesture = "None"
+
+    # 6. Display classification result for both hands
+    cv2.putText(frame, f"Right: {right_gesture}", (10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    cv2.putText(frame, f"Left: {left_gesture}", (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
     cv2.imshow("Hand Gesture Classification", frame)
 
     # Exit on 'q' key press
