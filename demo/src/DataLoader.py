@@ -97,12 +97,12 @@ def get_data_loaders(file_path, batch_size=32, test_size=0.2):
 
     # Define gesture labels mapping (each gesture is mapped to a unique integer)
     label_mapping = {
-        "closed_fist": 0,
-        "open_hand": 1,
-        "thumbs_up": 2,
-        "index_thumb": 3,
-        "pinky_thumb": 4,
-        "thumbs_down": 5
+        "forward_point": 0,
+        "back_point": 1,
+        "left_point": 2,
+        "right_point": 3,
+        "open_hand": 4,
+        "index_thumb": 5
     }
 
     # Ensure all labels are correctly mapped
