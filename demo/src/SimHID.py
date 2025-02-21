@@ -119,6 +119,58 @@ def load_model(model_path, num_classes):
     model.eval()  # Set model to evaluation mode
     return model
 
+def calculate_mouse_movement(prev_coords, current_coords, sensitivity):
+    """
+    Calculate the change in mouse x and y coordinates based on the previous and current normalized coordinates.
+    
+    Args:
+         prev_coords (tuple or None): (prev_x, prev_y) if available, otherwise None.
+         current_coords (tuple): (current_x, current_y)
+         sensitivity (float): Scaling factor to convert normalized differences to pixel movement.
+         
+    Returns:
+         tuple: (delta_x, delta_y) computed as pixel differences.
+    """
+    if prev_coords is None:
+        return 0, 0
+    prev_x, prev_y = prev_coords
+    current_x, current_y = current_coords
+    delta_x = (current_x - prev_x) * sensitivity
+    delta_y = (current_y - prev_y) * sensitivity
+    return delta_x, delta_y
+
+def update_mouse_position(current_coords, right_gesture, sim_mouse_dx, sim_mouse_dy, sim_mouse_x, sim_mouse_y, window_width, window_height):
+    """
+    Update the simulated mouse pointer based on current right-hand coordinates,
+    potential mouse movement, and gesture.
+
+    Args:
+         current_coords (tuple or None): Current right-hand raw coordinates (x, y)
+         right_gesture (str): The recognized gesture for the right hand.
+         sim_mouse_dx (float): Calculated change in x.
+         sim_mouse_dy (float): Calculated change in y.
+         sim_mouse_x (int): Current simulated mouse x position.
+         sim_mouse_y (int): Current simulated mouse y position.
+         window_width (int): Width of simulated window.
+         window_height (int): Height of simulated window.
+
+    Returns:
+         tuple: (sim_mouse_x, sim_mouse_y, prev_right_x, prev_right_y) after updating.
+    """
+    # Update the mouse location ONLY if the right hand is not a closed fist
+    if current_coords is not None and right_gesture != "closed_fist":
+        # Send mouse position update 
+        sim_mouse_x += int(sim_mouse_dx)
+        sim_mouse_y += int(sim_mouse_dy)
+        # Clamp pointer position to remain within simulated window bounds
+        sim_mouse_x = max(0, min(window_width, sim_mouse_x))
+        sim_mouse_y = max(0, min(window_height, sim_mouse_y))
+        # Save the current coordinates for the next frame
+        prev_right_x, prev_right_y = current_coords
+    else:  # Hand was lost or closed_fist, so do not update the mouse position and do not track
+        prev_right_x, prev_right_y = None, None
+    return sim_mouse_x, sim_mouse_y, prev_right_x, prev_right_y
+
 # ---------------- Main Function ----------------
 
 def main():
@@ -141,6 +193,7 @@ def main():
     sim_mouse_y = SIM_WINDOW_HEIGHT // 2  # Start in the middle of the window
     prev_right_x, prev_right_y = None, None  # Save, the previous frame hand coordinates
     current_right_coords = None  # Track the current right-hand raw x,y coordinates
+    sim_mouse_dx, sim_mouse_dy = 0, 0  # Variables to store next mouse movement
 
     # Start webcam capture
     cap = cv2.VideoCapture(1)
@@ -165,6 +218,7 @@ def main():
             right_gesture = "None"
             left_gesture = "None"
             current_right_coords = None  # Reset current right-hand raw coordinate each frame
+            sim_mouse_dx, sim_mouse_dy = 0, 0  # Reset potential mouse movement each frame
 
             # 5. If hands are detected, process landmarks
             if results.multi_hand_landmarks:
@@ -185,23 +239,23 @@ def main():
                         connection_drawing_spec=connection_spec
                     )
 
-                    # For the right hand, extract the raw coordinate for the tracking landmark
+                    # Use the main right-hand coordinate for mouse tracking
                     if handedness == "Right":
-                        # Get raw normalized coordinates for the designated landmark (before any normalization for classification)
+                        # Get raw normalized coordinates for the designated landmark (before any normalization)
                         current_right_coords = (
                             hand_landmarks.landmark[MOUSE_TRACKING_LANDMARK].x,
                             hand_landmarks.landmark[MOUSE_TRACKING_LANDMARK].y
                         )
+                        # Calculate corresponding mouse movement
+                        prev_coords = (prev_right_x, prev_right_y) if prev_right_x is not None and prev_right_y is not None else None
+                        sim_mouse_dx, sim_mouse_dy = calculate_mouse_movement(prev_coords, current_right_coords, SENSITIVITY)
 
-                    # Extract landmark coordinates for classification (flatten the list)
+                    # Extract and normalize landmark coordinates for classification
                     landmarks = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark]).flatten()
-                    # Normalize landmarks relative to the wrist for invariant classification
                     normalized_landmarks = normalize_landmarks(landmarks)
+                    landmarks_tensor = torch.tensor(normalized_landmarks, dtype=torch.float32).unsqueeze(0).to(DEVICE)  # Convert to PyTorch tensor
 
-                    # Convert normalized landmarks to PyTorch tensor
-                    landmarks_tensor = torch.tensor(normalized_landmarks, dtype=torch.float32).unsqueeze(0).to(DEVICE)
-
-                    # Gesture classification based on hand type
+                    # Classify the gesture
                     with torch.no_grad():
                         # Classify right hand gestures
                         if handedness == "Right":
@@ -219,10 +273,11 @@ def main():
                         # Classify left hand gestures
                         elif handedness == "Left":
                             output = left_model(landmarks_tensor)  # Get class probabilities from model
-                            probabilities = torch.softmax(output, dim=1)[0]
-                            predicted_class = torch.argmax(probabilities).item()
-                            confidence = probabilities[predicted_class].item()
+                            probabilities = torch.softmax(output, dim=1)[0]  # Format probabilities
+                            predicted_class = torch.argmax(probabilities).item()  # Get most likely gesture
+                            confidence = probabilities[predicted_class].item()  # Get confidence score
 
+                            # Apply confidence threshold
                             if confidence >= MIN_RECOGNITION_CONFIDENCE:
                                 left_gesture = L_GESTURE_LABELS[predicted_class]
                             else:
@@ -250,24 +305,11 @@ def main():
 
             # ---------------- Update Simulated Mouse and Key Press Window ----------------
 
-            # Update simulated mouse pointer position based on right-hand movement
-            # Only update if a right-hand is detected and the gesture is not "closed_fist"
-            if current_right_coords is not None and right_gesture != "closed_fist":
-                current_right_x, current_right_y = current_right_coords
-                if prev_right_x is not None and prev_right_y is not None:
-                    # Compute delta in normalized space and convert to pixel movement using sensitivity
-                    delta_x = (current_right_x - prev_right_x) * SENSITIVITY
-                    delta_y = (current_right_y - prev_right_y) * SENSITIVITY
-                    sim_mouse_x += int(delta_x)
-                    sim_mouse_y += int(delta_y)
-                    # Clamp pointer position to remain within simulated window bounds
-                    sim_mouse_x = max(0, min(SIM_WINDOW_WIDTH, sim_mouse_x))
-                    sim_mouse_y = max(0, min(SIM_WINDOW_HEIGHT, sim_mouse_y))
-                # Update previous right-hand coordinates for next frame
-                prev_right_x, prev_right_y = current_right_x, current_right_y
-            else:
-                # If no right-hand is detected or gesture is "closed_fist", reset previous coordinates
-                prev_right_x, prev_right_y = None, None
+            # Update simulated mouse pointer position.
+            sim_mouse_x, sim_mouse_y, prev_right_x, prev_right_y = update_mouse_position(
+                current_right_coords, right_gesture, sim_mouse_dx, sim_mouse_dy,
+                sim_mouse_x, sim_mouse_y, SIM_WINDOW_WIDTH, SIM_WINDOW_HEIGHT
+            )
 
             # Determine the mouse button action from the right-hand gesture
             mouse_action = right_mouse_map.get(right_gesture, None)
