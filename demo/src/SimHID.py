@@ -171,6 +171,74 @@ def update_mouse_position(current_coords, right_gesture, sim_mouse_dx, sim_mouse
         prev_right_x, prev_right_y = None, None
     return sim_mouse_x, sim_mouse_y, prev_right_x, prev_right_y
 
+def show_mouse_action(mouse_action):
+    """
+    Determine the pointer color and shape based on the mouse action.
+
+    Args:
+        mouse_action (str): The current mouse action.
+
+    Returns:
+        tuple: (pointer_color, pointer_shape) for the simulated mouse pointer.
+    """
+    match mouse_action:
+        case "left_click":
+            pointer_color = (0, 0, 255)  # Red for left click
+            pointer_shape = "circle"
+        case "right_click":
+            pointer_color = (255, 0, 0)  # Blue for right click
+            pointer_shape = "circle"
+        case "scroll_up":
+            pointer_color = (255, 255, 255)  # Default: white
+            pointer_shape = "arrow_up"
+        case "scroll_down":
+            pointer_color = (255, 255, 255)  # Default: white
+            pointer_shape = "arrow_down"
+        case _:
+            pointer_color = (255, 255, 255)  # Default: white
+            pointer_shape = "circle"         # Default shape
+
+    return pointer_color, pointer_shape
+
+def display_simulated_window(sim_mouse_x, sim_mouse_y, pointer_shape, pointer_color, key_press, mouse_action):
+    """
+    Display the simulated mouse pointer and key press on a blank window.
+
+    Args:
+        sim_mouse_x (int): Simulated mouse x position.
+        sim_mouse_y (int): Simulated mouse y position.
+        pointer_shape (str): Shape of the pointer ("circle", "arrow_up", "arrow_down").
+        pointer_color (tuple): Color of the pointer (B, G, R).
+        key_press (str): Key press to display.
+        mouse_action (str): Mouse action to display.
+    """
+    # Create a blank simulated window image
+    sim_window = np.zeros((SIM_WINDOW_HEIGHT, SIM_WINDOW_WIDTH, 3), dtype=np.uint8)
+
+    # Draw the simulated mouse pointer
+    if pointer_shape == "circle":
+        cv2.circle(sim_window, (sim_mouse_x, sim_mouse_y), 10, pointer_color, -1)
+    elif pointer_shape == "arrow_up":
+        # Draw an upward pointing arrow using arrowedLine
+        cv2.arrowedLine(sim_window, (sim_mouse_x, sim_mouse_y + 15),
+                        (sim_mouse_x, sim_mouse_y - 15), pointer_color, 3, tipLength=0.5)
+    elif pointer_shape == "arrow_down":
+        # Draw a downward pointing arrow
+        cv2.arrowedLine(sim_window, (sim_mouse_x, sim_mouse_y - 15),
+                        (sim_mouse_x, sim_mouse_y + 15), pointer_color, 3, tipLength=0.5)
+
+    # Display the key press text on the simulated window
+    if key_press is not None:
+        cv2.putText(sim_window, f"Key: {key_press}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+    # Optionally, display the current mouse action (for debugging/feedback)
+    if mouse_action is not None:
+        cv2.putText(sim_window, f"Mouse: {mouse_action}", (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+    cv2.imshow("Simulated Mouse and Key Presses", sim_window)
+
 # ---------------- Main Function ----------------
 
 def main():
@@ -303,7 +371,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             cv2.imshow("Hand Gesture Classification", frame)
 
-            # ---------------- Update Simulated Mouse and Key Press Window ----------------
+            # ---------------- Update Mouse and Key Press ----------------
 
             # Update simulated mouse pointer position.
             sim_mouse_x, sim_mouse_y, prev_right_x, prev_right_y = update_mouse_position(
@@ -313,48 +381,14 @@ def main():
 
             # Determine the mouse button action from the right-hand gesture
             mouse_action = right_mouse_map.get(right_gesture, None)
-
-            # Determine pointer appearance based on mouse action
-            pointer_color = (255, 255, 255)  # Default: white
-            pointer_shape = "circle"         # Default shape
-            if mouse_action == "left_click":
-                pointer_color = (0, 0, 255)    # Red for left click
-            elif mouse_action == "right_click":
-                pointer_color = (255, 0, 0)    # Blue for right click
-            elif mouse_action == "scroll_up":
-                pointer_shape = "arrow_up"
-            elif mouse_action == "scroll_down":
-                pointer_shape = "arrow_down"
+            pointer_color, pointer_shape = show_mouse_action(mouse_action)
 
             # Determine the key press from the left-hand gesture mapping
             key_press = left_key_map.get(left_gesture, None)
 
-            # Create a blank simulated window image
-            sim_window = np.zeros((SIM_WINDOW_HEIGHT, SIM_WINDOW_WIDTH, 3), dtype=np.uint8)
-
-            # Draw the simulated mouse pointer
-            if pointer_shape == "circle":
-                cv2.circle(sim_window, (sim_mouse_x, sim_mouse_y), 10, pointer_color, -1)
-            elif pointer_shape == "arrow_up":
-                # Draw an upward pointing arrow using arrowedLine
-                cv2.arrowedLine(sim_window, (sim_mouse_x, sim_mouse_y + 15),
-                                (sim_mouse_x, sim_mouse_y - 15), pointer_color, 3, tipLength=0.5)
-            elif pointer_shape == "arrow_down":
-                # Draw a downward pointing arrow
-                cv2.arrowedLine(sim_window, (sim_mouse_x, sim_mouse_y - 15),
-                                (sim_mouse_x, sim_mouse_y + 15), pointer_color, 3, tipLength=0.5)
-
-            # Display the key press text on the simulated window
-            if key_press is not None:
-                cv2.putText(sim_window, f"Key: {key_press}", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-            # Optionally, display the current mouse action (for debugging/feedback)
-            if mouse_action is not None:
-                cv2.putText(sim_window, f"Mouse: {mouse_action}", (10, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-
-            cv2.imshow("Simulated Mouse and Key Presses", sim_window)
+            # Display the mouse and keypress on a separate window
+            display_simulated_window(sim_mouse_x, sim_mouse_y, pointer_shape, pointer_color, key_press, mouse_action)
+            
             # -----------------------------------------------------------------------------
 
             # Exit on 'q' key press
