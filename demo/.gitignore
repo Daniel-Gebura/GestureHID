@@ -1,5 +1,5 @@
 # Virtual Environment
-GHID_env/
+demo_venv/
 venv/
 .env/
 *.venv
