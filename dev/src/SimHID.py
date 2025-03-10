@@ -114,7 +114,7 @@ def load_model(model_path, num_classes):
     Returns:
         model (torch.nn.Module): Loaded PyTorch model in evaluation mode.
     """
-    model = GestureClassifier(hidden_size=32, output_size=num_classes).to(DEVICE)
+    model = GestureClassifier(hidden_size=16, output_size=num_classes).to(DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()  # Set model to evaluation mode
     return model

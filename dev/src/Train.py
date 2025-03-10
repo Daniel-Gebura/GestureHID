@@ -24,15 +24,15 @@ LEARNING_RATE = 0.001      # Learning rate for optimizer
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # Use GPU if available
 
 # Load the dataset
-train_loader, val_loader = get_data_loaders("../data/right_dataset_v1.csv", hand="right", batch_size=BATCH_SIZE)
+train_loader, val_loader = get_data_loaders("../data/left_dataset_v1.csv", hand="left", batch_size=BATCH_SIZE)
 
 # Initialize the model
-model = GestureClassifier(hidden_size=32, output_size=6).to(DEVICE)  # Model for 6 gesture classes
+model = GestureClassifier(hidden_size=16, output_size=6).to(DEVICE)  # Model for 6 gesture classes
 criterion = nn.CrossEntropyLoss()  # Loss function: Cross-Entropy for multi-class classification
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)  # Optimizer: Adam
 
 # Initialize Tensorboard for logging
-writer = SummaryWriter("../runs/mini_right_multiclass_gesture_classifier")
+writer = SummaryWriter("../runs/mini_left_multiclass_gesture_classifier")
 
 # Training/Validation loop
 for epoch in range(EPOCHS):
@@ -125,5 +125,5 @@ for epoch in range(EPOCHS):
         print(f"   {cls}: Accuracy = {acc:.4f}")
 
 # Save the Trained Model
-torch.save(model.state_dict(), "../models/mini_right_multiclass_gesture_classifier.pth")
+torch.save(model.state_dict(), "../models/mini_left_multiclass_gesture_classifier.pth")
 writer.close()
