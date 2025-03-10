@@ -77,7 +77,7 @@ def normalize_landmarks(landmarks):
 
     return normalized
 
-def get_data_loaders(file_path, batch_size=32, test_size=0.2):
+def get_data_loaders(file_path, hand, batch_size=32, test_size=0.2):
     """
     Loads the dataset from a CSV file, preprocesses it, normalizes landmarks,
     and returns PyTorch DataLoaders.
@@ -96,14 +96,24 @@ def get_data_loaders(file_path, batch_size=32, test_size=0.2):
     df = pd.read_csv(file_path, header=None)
 
     # Define gesture labels mapping (each gesture is mapped to a unique integer)
-    label_mapping = {
-        "forward_point": 0,
-        "back_point": 1,
-        "left_point": 2,
-        "right_point": 3,
-        "open_hand": 4,
-        "index_thumb": 5
-    }
+    if hand == "right":
+        label_mapping = {
+            "closed_fist": 0,
+            "open_hand": 1,
+            "thumbs_up": 2,
+            "index_thumb": 3,
+            "pinky_thumb": 4,
+            "thumbs_down": 5
+        }
+    else:
+        label_mapping = {
+            "forward_point": 0,
+            "back_point": 1,
+            "left_point": 2,
+            "right_point": 3,
+            "open_hand": 4,
+            "index_thumb": 5
+        }
 
     # Ensure all labels are correctly mapped
     if not set(df[0].unique()).issubset(set(label_mapping.keys())):
