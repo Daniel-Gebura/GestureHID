@@ -22,8 +22,8 @@ R_GESTURE_LABELS = ["closed_fist", "open_hand", "thumbs_up", "index_thumb", "pin
 L_GESTURE_LABELS = ["forward_point", "back_point", "left_point", "right_point", "open_hand", "index_thumb"]
 
 # Specify the paths to the trained PyTorch models
-R_MODEL_PATH = "../models/right_multiclass_gesture_classifier.pth"
-L_MODEL_PATH = "../models/left_multiclass_gesture_classifier.pth"
+R_MODEL_PATH = "../models/mini_right_multiclass_gesture_classifier.pth"
+L_MODEL_PATH = "../models/mini_left_multiclass_gesture_classifier.pth"
 
 # Model confidence thresholds
 MIN_DETECTION_CONFIDENCE = 0.5   # Confidence threshold for hand detection
@@ -114,7 +114,7 @@ def load_model(model_path, num_classes):
     Returns:
         model (torch.nn.Module): Loaded PyTorch model in evaluation mode.
     """
-    model = GestureClassifier(output_size=num_classes).to(DEVICE)
+    model = GestureClassifier(hidden_size=32, output_size=num_classes).to(DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()  # Set model to evaluation mode
     return model
