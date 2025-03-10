@@ -1,8 +1,47 @@
-# .gitignore
-build/
-*.o
-*.out
+# Virtual Environment
+demo_venv/
+venv/
+.env/
+*.venv
+
+# Python Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dataset & Temporary Data
+data/
+gesture_dataset/
+*.csv  # Ignore dataset files
+*.json
+*.h5
+*.npy
+*.pkl  # Pickle files
+
+# TensorBoard Logs
+runs/
+logs/
+events.out.tfevents.*
+
+# PyTorch Lightning & Debug Logs
+lightning_logs/
 *.log
-*.csv
-*.tflite
+debug.log
+
+# Build Artifacts
+dist/
+build/
+*.so
+*.o
+*.a
+*.dll
+*.dylib
+*.exe
+
+# Editor & OS-Specific Files
 .vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
