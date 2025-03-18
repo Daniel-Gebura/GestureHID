@@ -80,7 +80,7 @@ def load_model(model_path, num_classes):
     model.eval()  # Set the model to evaluation mode
     return model
 
-def get_video_capture():
+def get_webcam_capture():
     """
     Initialize the webcam for capturing video frames.
 
@@ -98,6 +98,31 @@ def get_video_capture():
     cap.set(cv2.CAP_PROP_FPS, 30)  # Maintain a stable 30 FPS
     return cap
 
+def get_csi_capture():
+    """
+    Initialize the video capture for a CSI camera or a USB camera.
+
+    Returns:
+        cap: OpenCV video capture object.
+    """
+    # Use GStreamer pipeline for CSI camera
+    GSTREAMER_PIPELINE = (
+        "nvarguscamerasrc ! "
+        "video/x-raw(memory:NVMM), width=1280, height=720, format=(string)NV12, framerate=30/1 ! "
+        "nvvidconv flip-method=0 ! "
+        "video/x-raw, width=320, height=240, format=(string)BGRx ! "
+        "videoconvert ! "
+        "video/x-raw, format=(string)BGR ! appsink drop=true sync=false"
+    )
+
+    cap = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
+
+    if not cap.isOpened():
+        print("Error: Could not open CSI camera!")
+        exit()
+    
+    return cap
+
 def main():
     """
     Main function to process webcam feed and classify hand gestures in real time.
@@ -108,7 +133,7 @@ def main():
     right_model = load_model("../models/mini_right_multiclass_gesture_classifier.pth", len(R_GESTURE_LABELS))
     left_model = load_model("../models/mini_left_multiclass_gesture_classifier.pth", len(L_GESTURE_LABELS))
 
-    cap = get_video_capture()  # Start video capture
+    cap = get_webcam_capture()  # Start video capture
 
     # Perform processing loop in a try block to ensure graceful exit
     try:
