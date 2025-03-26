@@ -104,13 +104,44 @@ class MouseFSM:
     STATE_NONE = 0
     STATE_HOLDING = 1
 
-    def __init__(self):
+    def __init__(self, sensitivity=1000):
         self.state = self.STATE_NONE
         self.prev_gesture = None
         self.hid = HIDController()
+        self.sensitivity = sensitivity
         self.curr_buttons = 0x00  # Bitmask of current buttons being held
+    
+    def _calculate_mouse_movement(prev_xy, curr_xy):
+        """
+        Calculate the change in mouse x and y coordinates based on the previous and current normalized coordinates.
+        
+        Args:
+            prev_xy (tuple or None): (prev_x, prev_y) if available, otherwise None.
+            curr_xy (tuple): (curr_x, curr_y)
+            
+        Returns:
+            tuple: (delta_x, delta_y) computed as pixel differences.
+        """
+        # Do not move mouse if either set of coordinates is missing
+        if prev_xy is None or curr_xy is None:
+            return 0, 0
+        prev_x, prev_y = prev_xy
+        curr_x, curr_y = curr_xy
+        delta_x = (curr_x - prev_x) * self.sensitivity
+        delta_y = (curr_y - prev_y) * self.sensitivity
+        return delta_x, delta_y
 
-    def update(self, gesture):
+    def _move_mouse(self, dx, dy):
+        """
+        Move the mouse while preserving the current button state.
+
+        Args:
+            dx (float): Pixels to move in X direction.
+            dy (float): Pixels to move in Y direction.
+        """
+        self.hid.move_mouse(int(dx), int(dy), buttons=self.curr_buttons)
+
+    def update(self, gesture, prev_xy, curr_xy):
         """
         Update the mouse button press/release logic.
 
@@ -148,15 +179,10 @@ class MouseFSM:
                         self.prev_gesture = None  # Reset the previous gesture
                 # Else, continue pressing the mouse button
 
-    def move_mouse(self, dx, dy):
-        """
-        Move the mouse while preserving the current button state.
-
-        Args:
-            dx (float): Pixels to move in X direction.
-            dy (float): Pixels to move in Y direction.
-        """
-        self.hid.move_mouse(int(dx), int(dy), buttons=self.curr_buttons)
+        # No matter the state, move the mouse based on the coordinate differene
+        dx, dy = self._calculate_mouse_movement(prev_xy, curr_xy)
+        if gesture != "closed_fist":  # Only update the mouse position if the gesture is NOT closed_fist
+            self._move_mouse(dx, dy)
 
 class KeyboardFSM:
     """
