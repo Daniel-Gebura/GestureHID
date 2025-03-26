@@ -3,7 +3,7 @@
 #
 # Description: Defines the neural network model for multi-class hand gesture recognition.
 #
-# Author: Daniel Gebura, djg2170
+# Author: Daniel Gebura
 ################################################################
 import torch
 import torch.nn as nn
