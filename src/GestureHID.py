@@ -1,11 +1,11 @@
 ################################################################
-# GestureHID_Controller.py
+# GestureHID.py
 #
-# Description: Uses MediaPipe Hands to detect hand landmarks and classify
-# gestures in real-time using trained PyTorch models. Sends HID inputs
-# (mouse + keyboard) to a host system using HIDController on Jetson Nano.
+# Description: Uses MediaPipe and trained PyTorch models to classify
+# left and right hand gestures/position in real time. This information
+# is used to control mouse and keyboard input via USB HID commands.
 #
-# Author: Daniel Gebura (extended for live HID control)
+# Author: Daniel Gebura
 ################################################################
 
 import cv2
@@ -13,229 +13,221 @@ import mediapipe as mp
 import torch
 import numpy as np
 from Model import GestureClassifier
-from hid_controller import HIDController, MOUSE_LEFT, MOUSE_RIGHT
+from GestureFSM import HIDToggleFSM, MouseFSM, KeyboardFSM
 
-# Constants and Configuration ---------------------------------------
+# Device Optimization -----------------------------------------------
 
-# Labels used by each trained model
+torch.backends.cudnn.benchmark = True  # Enable faster CUDA optimizations
+torch.backends.cudnn.deterministic = False  # Avoid strict determinism for speed
+torch.set_grad_enabled(False)  # Disable autograd to save computation
+
+# Configuration Constants -------------------------------------------
+
+# Gesture Labels
 R_GESTURE_LABELS = ["closed_fist", "open_hand", "thumbs_up", "index_thumb", "pinky_thumb", "thumbs_down"]
 L_GESTURE_LABELS = ["forward_point", "back_point", "left_point", "right_point", "open_hand", "index_thumb"]
 
-CONFIDENCE_THRESHOLD = 0.3              # Minimum model confidence to accept prediction
-MOUSE_TRACKING_LANDMARK = 0             # Wrist as reference for mouse movement
-SENSITIVITY = 1000                      # Scales delta hand movement to pixel movement
+# Gesture Classification Model paths
+R_MODEL_PATH = "../models/mini_right_multiclass_gesture_classifier.pth"
+L_MODEL_PATH = "../models/mini_left_multiclass_gesture_classifier.pth"
 
-# MediaPipe hand detection thresholds
-MPH_DETECTION_CONFIDENCE = 0.9              # Confidence for detecting hands
-MPH_TRACKING_CONFIDENCE = 0.6               # Confidence for tracking hand motion
+# MediaPipe Hands Settings
+MPH_DETECTION_CONFIDENCE = 0.9
+MPH_TRACKING_CONFIDENCE = 0.6
 
-# Webcam resolution configuration
+# Gesture Classification Settings
+GESTURE_CONFIDENCE = 0.3
+
+# Mouse Control Settings
+MOUSE_SENSITIVITY = 1000
+MOUSE_TRACKING_LANDMARK = 0  # Wrist
+
+# Camera Settings
 CAMERA_WIDTH = 320
 CAMERA_HEIGHT = 240
 CAMERA_FPS = 30
 
-# Gesture → action mapping
-KEY_MAP = {
-    "forward_point": "w",
-    "back_point": "s",
-    "left_point": "a",
-    "right_point": "d",
-    "index_thumb": "esc"
-}
-MOUSE_MAP = {
-    "index_thumb": MOUSE_LEFT,
-    "pinky_thumb": MOUSE_RIGHT
-}
-
-# PyTorch device config
+# Set device
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-torch.backends.cudnn.benchmark = True
-torch.backends.cudnn.deterministic = False
-torch.set_grad_enabled(False)
 
 # Utility Functions -------------------------------------------------
 
-def normalize_landmarks(landmarks):
-    """
-    Normalize 3D hand landmarks relative to the wrist.
-
-    Args:
-        landmarks (list): Flat list of 63 values (21 points × 3 coordinates)
-
-    Returns:
-        np.ndarray: Normalized and flattened landmarks
-    """
-    landmarks = np.array(landmarks).reshape(21, 3)
-    wrist = landmarks[0]
-    landmarks -= wrist
-    max_distance = np.max(np.linalg.norm(landmarks, axis=1)) + 1e-8
-    return (landmarks / max_distance).flatten()
-
 def initialize_mediapipe_hands():
     """
-    Initialize MediaPipe Hands with provided confidence thresholds.
-
-    Args:
-        detection_confidence (float): Minimum detection confidence.
-        tracking_confidence (float): Minimum tracking confidence.
+    Initialize MediaPipe Hands model with detection and tracking config.
 
     Returns:
-        hands: Initialized MediaPipe Hands model
+        mp.solutions.Hands: MediaPipe Hands object
     """
+    # Get the MediaPipe Hands model and define settings
     mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
+    return mp_hands.Hands(
+        static_image_mode=False,  # Enable real-time video processing
+        max_num_hands=2,  # Allow detection of up to 2 hands
         min_detection_confidence=MPH_DETECTION_CONFIDENCE,
         min_tracking_confidence=MPH_TRACKING_CONFIDENCE
     )
-    return hands
 
-def load_model(path, num_classes):
+def load_gesture_model(path, num_classes):
     """
-    Load a trained PyTorch model from disk.
+    Load a trained PyTorch model for hand gesture classification from file and set to eval mode.
 
     Args:
-        path (str): Path to .pth file
-        num_classes (int): Output class size
+        path (str): Path to model file
+        num_classes (int): Number of output classes for classification
 
     Returns:
-        model: Loaded and ready PyTorch model
+        model (torch.nn.Module): Loaded gesture classifier model
     """
-    model = GestureClassifier(hidden_size=16, output_size=num_classes).to(DEVICE)
-    model.load_state_dict(torch.load(path, map_location=DEVICE))
-    model.half()
-    model.eval()
+    model = GestureClassifier(hidden_size=16, output_size=num_classes).to(DEVICE)  # Move model to CPU or GPU
+    model.load_state_dict(torch.load(path, map_location=DEVICE))  # Load model weights
+    model.half()  # Convert model to FP16 (Half Precision) to reduce memory usage
+    model.eval()  # Set the model to evaluation mode
     return model
 
-def get_webcam_capture():
+def get_camera():
     """
-    Initialize and return a webcam capture object.
+    Attempt to open camera capture.
 
     Returns:
-        cap: OpenCV VideoCapture object
+        cv2.VideoCapture: Video capture object
     """
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(1)  # Try USB webcam first
     if not cap.isOpened():
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(0)  # Fallback to another camera index
     if not cap.isOpened():
-        print("Error: Could not open any webcam!")
+        print("Error: Could not open any webcam!")  # Display an error if no camera is found
         exit()
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
     cap.set(cv2.CAP_PROP_FPS, CAMERA_FPS)
     return cap
 
-def calculate_mouse_delta(prev_coords, current_coords):
+def normalize_landmarks(landmarks):
     """
-    Compute pixel delta from hand movement.
+    Vectorized normalization of hand landmarks relative to the wrist (landmark 0).
+    Ensures location-invariant gesture classification.
 
     Args:
-        prev_coords (tuple): Previous (x, y)
-        current_coords (tuple): Current (x, y)
+        landmarks (list): List of 63 values (21 landmarks * XYZ coordinates).
 
     Returns:
-        tuple: (dx, dy) scaled by sensitivity
+        numpy.ndarray: Normalized hand landmark coordinates.
     """
-    if not prev_coords:
-        return 0, 0
-    dx = (current_coords[0] - prev_coords[0]) * SENSITIVITY
-    dy = (current_coords[1] - prev_coords[1]) * SENSITIVITY
-    return int(dx), int(dy)
+    # Check for faulty landmarks
+    if len(landmarks) != 63:
+        return np.zeros(63, dtype=np.float32)
+    
+    landmarks = np.array(landmarks).reshape(21, 3)  # Convert to a 21x3 NumPy array
+    wrist = landmarks[0]  # Extract wrist coordinates (reference point)
+    landmarks -= wrist  # Translate all landmarks relative to the wrist
+    max_distance = np.max(np.linalg.norm(landmarks, axis=1)) + 1e-8  # Normalize to the largest distance
+    return (landmarks / max_distance).flatten()  # Flatten and normalize the coordinates
 
-# Main Processing ---------------------------------------------------
+# Main Gesture HID Application --------------------------------------
 
 def main():
     """
-    Main loop for video capture, gesture recognition, and HID control.
+    Main processing loop that reads webcam frames, detects hand landmarks,
+    classifies gestures, and delegates control to FSM-based HID abstraction.
     """
+    # Load gesture models
+    right_model = load_gesture_model(R_MODEL_PATH, len(R_GESTURE_LABELS))
+    left_model = load_gesture_model(L_MODEL_PATH, len(L_GESTURE_LABELS))
+
+    # Initialize HID FSMs
+    toggle_fsm = HIDToggleFSM()  # State machine to toggle HID control on/off
+    mouse_fsm = MouseFSM(sensitivity=MOUSE_SENSITIVITY)  # State machine to control mouse
+    keyboard_fsm = KeyboardFSM()  # State machine to control keyboard press/release
+    hid_enabled = True  # HID control is initially enabled
+    prev_track_coords = None  # Track the previous frame's tracking coordinates 
+
+    # Initialize webcam and mediapipe hands model
+    cap = get_camera()
     hands = initialize_mediapipe_hands()
-    right_model = load_model("../models/mini_right_multiclass_gesture_classifier.pth", len(R_GESTURE_LABELS))
-    left_model = load_model("../models/mini_left_multiclass_gesture_classifier.pth", len(L_GESTURE_LABELS))
-    cap = get_webcam_capture()                                              # Start webcam
-    hid = HIDController()                                                   # Initialize HID writer
 
-    prev_coords = None                                                      # Store previous mouse position for delta calculation
-
+    # Perform processing loop in a try block to ensure graceful exit
     try:
+        # Main processing loop
         while cap.isOpened():
-            ret, frame = cap.read()                                         # Read frame
+            # 1. Read frame
+            ret, frame = cap.read()
             if not ret:
                 continue
 
-            frame = cv2.flip(frame, 1)                                      # Mirror image
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)                   # Convert to RGB
-            results = hands.process(rgb)                                    # Run hand detection
+            # 2. Preprocess frame (flip horizontally and convert to RGB)
+            frame = cv2.flip(frame, 1)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            right_gesture, left_gesture = "None", "None"                   # Reset state
-            current_coords = None
+            # 3. Process frame using MediaPipe Hands
+            results = hands.process(rgb)
 
+            # 4. Reset gesture labels for each hand and tracking coordinates
+            right_gesture = "None"
+            left_gesture = "None"
+            curr_track_coords = None
+
+            # 5. If hands are detected, process landmarks
             if results.multi_hand_landmarks:
-                hands_data = []
-                hand_sides = []
-                raw_landmarks = []
+                # Iterate over detected hands
+                for hand_idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
+                    # Get the handedness ("Right" or "Left") of this hand
+                    handedness = results.multi_handedness[hand_idx].classification[0].label
 
-                for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                    handedness = results.multi_handedness[idx].classification[0].label  # Get Left/Right
-                    raw_landmarks.append(hand_landmarks)
-                    hand_sides.append(handedness)
-
-                    # Normalize for classifier
+                    # Extract hand landmarks, normalize them, and convert to tensor
                     landmarks = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark]).flatten()
-                    hands_data.append(normalize_landmarks(landmarks))
+                    normalized = normalize_landmarks(landmarks)
+                    landmark_tensor = torch.tensor(normalized, dtype=torch.float16).unsqueeze(0).to(DEVICE)
 
-                hands_tensor = torch.tensor(hands_data, dtype=torch.float16).to(DEVICE)
+                    # Classify this gesture based on the handedness
+                    if handedness == "Right":
+                        output = right_model(landmark_tensor)  # Forward pass through the model
+                        probs = torch.softmax(output, dim=1)[0]  # Get classification probabilities
+                        # Update gesture label if most likely class exceeds confidence threshold
+                        if probs.max().item() >= GESTURE_CONFIDENCE:
+                            right_gesture = R_GESTURE_LABELS[torch.argmax(probs).item()]
+                        # Update tracking coordinates for mouse movement
+                        curr_track_coords = (
+                            hand_landmarks.landmark[MOUSE_TRACKING_LANDMARK].x,
+                            hand_landmarks.landmark[MOUSE_TRACKING_LANDMARK].y
+                        )
 
-                with torch.no_grad():
-                    for i, hand_tensor in enumerate(hands_tensor):
-                        if hand_sides[i] == "Right":
-                            out = right_model(hand_tensor.unsqueeze(0))
-                            probs = torch.softmax(out, dim=1)[0]
-                            pred = torch.argmax(probs).item()
-                            if probs[pred] > CONFIDENCE_THRESHOLD:
-                                right_gesture = R_GESTURE_LABELS[pred]
+                    elif handedness == "Left":
+                        output = left_model(landmark_tensor)  # Forward pass through the model
+                        probs = torch.softmax(output, dim=1)[0]  # Get classification probabilities
+                        # Update gesture label if most likely class exceeds confidence threshold
+                        if probs.max().item() >= GESTURE_CONFIDENCE:
+                            left_gesture = L_GESTURE_LABELS[torch.argmax(probs).item()]
 
-                            # Track right-hand motion landmark
-                            current_coords = (
-                                raw_landmarks[i].landmark[MOUSE_TRACKING_LANDMARK].x,
-                                raw_landmarks[i].landmark[MOUSE_TRACKING_LANDMARK].y
-                            )
+            # 6. FSM HID Toggle Logic
+            if toggle_fsm.update(right_gesture):
+                # Gesture sequence completed, toggle the HID control state
+                hid_enabled = not hid_enabled
+                print(f"[INFO] HID {'ENABLED' if hid_enabled else 'DISABLED'}")
 
-                        elif hand_sides[i] == "Left":
-                            out = left_model(hand_tensor.unsqueeze(0))
-                            probs = torch.softmax(out, dim=1)[0]
-                            pred = torch.argmax(probs).item()
-                            if probs[pred] > CONFIDENCE_THRESHOLD:
-                                left_gesture = L_GESTURE_LABELS[pred]
+            # 7. FSM HID Action Logic
+            if hid_enabled:
+                # HID control is enabled, update the keyboard and mouse state machines with gestures
+                mouse_fsm.update(right_gesture, prev_track_coords, curr_track_coords)
+                keyboard_fsm.update(left_gesture)
 
-            # ---------------- Perform HID Actions ----------------
+            # 8. Save previous wrist position for next frame
+            prev_track_coords = curr_track_coords
 
-            if current_coords and right_gesture != "closed_fist":
-                dx, dy = calculate_mouse_delta(prev_coords, current_coords)
-                hid.move_mouse(dx, dy)                                       # Move mouse
-                prev_coords = current_coords
-            else:
-                prev_coords = None                                           # Stop tracking if hand is gone or closed
-
-            if right_gesture in MOUSE_MAP:
-                hid.press_mouse(MOUSE_MAP[right_gesture])                   # Click action
-                hid.release_mouse()
-
-            if left_gesture in KEY_MAP:
-                hid.tap_key(KEY_MAP[left_gesture])                          # Send key
-
-            torch.cuda.empty_cache()                                        # Clean GPU memory
-
+            # Exit condition
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
+    # Catch user interupt exception from main processing loop
     except KeyboardInterrupt:
-        print("[INFO] Interrupted by user.")
+        print("[INFO] Interrupted by user")
 
+    # Ensure all resources are always released even on unexpected exits
     finally:
         cap.release()
         hands.close()
-        print("[INFO] Clean exit.")
+        cv2.destroyAllWindows()
+        print("[INFO] Shutdown complete")
 
 if __name__ == "__main__":
     main()
