@@ -59,20 +59,20 @@ class HIDController:
         report = bytes([buttons & 0x07, x & 0xFF, y & 0xFF])  # 3-byte mouse report
         self._write_report(self.mouse_dev, report)
 
-        def press_mouse(self, button=MOUSE_LEFT):
+    def press_mouse(self, button=MOUSE_LEFT):
         """
         Press a mouse button.
 
         Args:
             button (int): One of the MOUSE_* constants.
         """
-            self.move_mouse(buttons=button)
+        self.move_mouse(buttons=button)
 
-        def release_mouse(self):
-            """
-            Release all mouse buttons.
-            """
-            self.move_mouse(buttons=0x00)
+    def release_mouse(self):
+        """
+        Release all mouse buttons.
+        """
+        self.move_mouse(buttons=0x00)
 
     # KEYBOARD FUNCTIONS --------------------------------------------
 
