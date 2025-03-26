@@ -44,7 +44,7 @@ class HIDToggleFSM:
     STATE_SECOND_FIST = 4
 
     def __init__(self):
-        self.state = STATE_IDLE
+        self.state = self.STATE_IDLE
         self.last_update_time = None
 
     def update(self, gesture):
@@ -62,37 +62,29 @@ class HIDToggleFSM:
 
         # Reset the state if timeout occurs
         if (self.last_update_time is not None) and (curr_time - self.last_update_time > 3.0):
-            self.state = STATE_IDLE
+            self.state = self.STATE_IDLE
 
         # Match the current state and update based on gesture
-        match self.state:
-            case self.STATE_IDLE:
-                # Only leave idle state if the first gesture is open_hand
-                if gesture == "open_hand":
-                    # Start the sequence
-                    self.state = STATE_FIRST_OPEN
-                    self.last_update_time = curr_time
-            case self.STATE_FIRST_OPEN:
-                # Transition to next state if the gesture is closed_fist
-                if gesture == "closed_fist":
-                    self.state = STATE_FIRST_FIST
-            case self.STATE_FIRST_FIST:
-                # Transition to next state if the gesture is open_hand
-                if gesture == "open_hand":
-                    self.state = STATE_SECOND_OPEN
-            case self.STATE_SECOND_OPEN:
-                # Transition to next state if the gesture is closed_fist
-                if gesture == "closed_fist":
-                    self.state = STATE_SECOND_FIST
-            case self.STATE_SECOND_FIST:
-                # Complete the sequence if the gesture is open_hand
-                if gesture == "open_hand":
-                    self.state = STATE_IDLE  # Reset the state
-                    return True  # Toggle the HID state
-            case _:
-                # Reset the state if an unexpected, known gesture is detected
-                if gesture not in ["open_hand", "closed_fist", "None"]:
-                    self.state = STATE_IDLE
+        if self.state == self.STATE_IDLE:
+            if gesture == "open_hand":
+                self.state = self.STATE_FIRST_OPEN
+                self.last_update_time = curr_time
+        elif self.state == self.STATE_FIRST_OPEN:
+            if gesture == "closed_fist":
+                self.state = self.STATE_FIRST_FIST
+        elif self.state == self.STATE_FIRST_FIST:
+            if gesture == "open_hand":
+                self.state = self.STATE_SECOND_OPEN
+        elif self.state == self.STATE_SECOND_OPEN:
+            if gesture == "closed_fist":
+                self.state = self.STATE_SECOND_FIST
+        elif self.state == self.STATE_SECOND_FIST:
+            if gesture == "open_hand":
+                self.state = self.STATE_IDLE
+                return True
+        else:
+            if gesture not in ["open_hand", "closed_fist", "None"]:
+                self.state = self.STATE_IDLE
 
         return False
 
@@ -109,20 +101,19 @@ class MouseFSM:
         self.prev_gesture = None
         self.hid = HIDController()
         self.sensitivity = sensitivity
-        self.curr_buttons = 0x00  # Bitmask of current buttons being held
-    
-    def _calculate_mouse_movement(prev_xy, curr_xy):
+        self.curr_buttons = 0x00
+
+    def _calculate_mouse_movement(self, prev_xy, curr_xy):
         """
         Calculate the change in mouse x and y coordinates based on the previous and current normalized coordinates.
-        
+
         Args:
             prev_xy (tuple or None): (prev_x, prev_y) if available, otherwise None.
             curr_xy (tuple): (curr_x, curr_y)
-            
+
         Returns:
             tuple: (delta_x, delta_y) computed as pixel differences.
         """
-        # Do not move mouse if either set of coordinates is missing
         if prev_xy is None or curr_xy is None:
             return 0, 0
         prev_x, prev_y = prev_xy
@@ -148,40 +139,31 @@ class MouseFSM:
         Args:
             gesture (str): Current right-hand gesture.
         """
-        # Match the current state and update based on gesture
-        match self.state:
-            case self.STATE_NONE:
-                # Begin pressing the corresponding mouse button if gesture is recognized
+        if self.state == self.STATE_NONE:
+            if gesture in MOUSE_MAP:
+                self.curr_buttons = MOUSE_MAP[gesture]
+                self.hid.press_mouse(self.curr_buttons)
+                self.state = self.STATE_HOLDING
+                self.prev_gesture = gesture
+        elif self.state == self.STATE_HOLDING:
+            if gesture == "open_hand":
+                self.hid.release_mouse()
+                self.state = self.STATE_NONE
+                self.curr_buttons = 0x00
+                self.prev_gesture = None
+            elif gesture != self.prev_gesture:
+                self.hid.release_mouse()
                 if gesture in MOUSE_MAP:
-                    self.curr_buttons = MOUSE_MAP[gesture]  # Save the current button bitmask
-                    self.hid.press_mouse(self.curr_buttons)  # Press the corresponding button
-                    self.state = self.STATE_HOLDING  # Transition to the holding state
-                    self.prev_gesture = gesture  # Save this gesture for later comparison
-            case self.STATE_HOLDING:
-                # Release the mouse button if the gesture is open_hand
-                if gesture == "open_hand":
-                    self.hid.release_mouse()  # Release the mouse button
-                    self.state = self.STATE_NONE  # Transition back to the none state
-                    self.curr_buttons = 0x00  # Reset the current button bitmask
-                    self.prev_gesture = None  # Reset the previous gesture
-                # Release the mouse button if the gesture changes
-                elif gesture != self.prev_gesture:
-                    self.hid.release_mouse()  # Release the mouse button
-                    # If the new gesture is recognized, press the new button
-                    if gesture in MOUSE_MAP:
-                        self.curr_buttons = MOUSE_MAP[gesture]  # Save the current button bitmask
-                        self.hid.press_mouse(self.curr_buttons)  # Press the corresponding button
-                        self.prev_gesture = gesture  # Save this gesture for later comparison
-                    # If the new gesture is not recognized, reset the state
-                    else:
-                        self.state = self.STATE_NONE  # Transition back to the none state
-                        self.curr_buttons = 0x00  # Reset the current button bitmask
-                        self.prev_gesture = None  # Reset the previous gesture
-                # Else, continue pressing the mouse button
+                    self.curr_buttons = MOUSE_MAP[gesture]
+                    self.hid.press_mouse(self.curr_buttons)
+                    self.prev_gesture = gesture
+                else:
+                    self.state = self.STATE_NONE
+                    self.curr_buttons = 0x00
+                    self.prev_gesture = None
 
-        # No matter the state, move the mouse based on the coordinate differene
         dx, dy = self._calculate_mouse_movement(prev_xy, curr_xy)
-        if gesture != "closed_fist":  # Only update the mouse position if the gesture is NOT closed_fist
+        if gesture != "closed_fist":
             self._move_mouse(dx, dy)
 
 class KeyboardFSM:
@@ -189,7 +171,6 @@ class KeyboardFSM:
     FSM to manage persistent key press/release behavior for gestures.
     ESC key is handled as a tap-only gesture.
     """
-    # FSM State Names
     STATE_NONE = 0
     STATE_HOLDING = 1
 
@@ -206,31 +187,23 @@ class KeyboardFSM:
         Args:
             gesture (str): Current left-hand gesture.
         """
-        # Match the current state and update based on gesture
-        match self.state:
-            case self.STATE_NONE:
-                # Begin pressing the corresponding key if gesture is recognized
+        if self.state == self.STATE_NONE:
+            if gesture in KEY_MAP:
+                key = KEY_MAP[gesture]
+                self.hid.press_key(key)
+                self.prev_gesture = gesture
+                self.state = self.STATE_HOLDING
+        elif self.state == self.STATE_HOLDING:
+            if gesture == "open_hand":
+                self.hid.release_keys()
+                self.prev_gesture = None
+                self.state = self.STATE_NONE
+            elif gesture != self.prev_gesture:
+                self.hid.release_keys()
                 if gesture in KEY_MAP:
-                    key = KEY_MAP[gesture]  # Get the key value
-                    self.hid.press_key(key)  # Begin holding the key
-                    self.prev_gesture = gesture  # Save this gesture for later comparison
-                    self.state = self.STATE_HOLDING  # Transition to the holding state
-            case self.STATE_HOLDING:
-                # Release the key if the gesture is open_hand
-                if gesture == "open_hand":
-                    self.hid.release_keys()
-                    self.prev_gesture = None
+                    key = KEY_MAP[gesture]
+                    self.hid.press_key(key)
+                    self.prev_gesture = gesture
+                else:
                     self.state = self.STATE_NONE
-                # Release the key if the gesture changes
-                elif gesture != self.prev_gesture:
-                    self.hid.release_keys()
-                    # If the new gesture is recognized, press the new key
-                    if gesture in KEY_MAP:
-                        key = KEY_MAP[gesture]
-                        self.hid.press_key(key)
-                        self.prev_gesture = gesture
-                    else:
-                    # If the new gesture is not recognized, reset the state
-                        self.state = self.STATE_NONE
-                        self.prev_gesture = None
-                # Else, continue pressing the key
+                    self.prev_gesture = None
