@@ -108,6 +108,7 @@ class MouseFSM:
         self.state = self.STATE_NONE
         self.prev_gesture = None
         self.hid = HIDController()
+        self.curr_buttons = 0x00  # Bitmask of current buttons being held
 
     def update(self, gesture):
         """
@@ -121,7 +122,8 @@ class MouseFSM:
             case self.STATE_NONE:
                 # Begin pressing the corresponding mouse button if gesture is recognized
                 if gesture in MOUSE_MAP:
-                    self.hid.press_mouse(MOUSE_MAP[gesture])  # Press the corresponding button
+                    self.curr_buttons = MOUSE_MAP[gesture]  # Save the current button bitmask
+                    self.hid.press_mouse(self.curr_buttons)  # Press the corresponding button
                     self.state = self.STATE_HOLDING  # Transition to the holding state
                     self.prev_gesture = gesture  # Save this gesture for later comparison
             case self.STATE_HOLDING:
@@ -129,19 +131,32 @@ class MouseFSM:
                 if gesture == "open_hand":
                     self.hid.release_mouse()  # Release the mouse button
                     self.state = self.STATE_NONE  # Transition back to the none state
+                    self.curr_buttons = 0x00  # Reset the current button bitmask
                     self.prev_gesture = None  # Reset the previous gesture
                 # Release the mouse button if the gesture changes
                 elif gesture != self.prev_gesture:
                     self.hid.release_mouse()  # Release the mouse button
                     # If the new gesture is recognized, press the new button
                     if gesture in MOUSE_MAP:
-                        self.hid.press_mouse(MOUSE_MAP[gesture])  # Press the corresponding button
+                        self.curr_buttons = MOUSE_MAP[gesture]  # Save the current button bitmask
+                        self.hid.press_mouse(self.curr_buttons)  # Press the corresponding button
                         self.prev_gesture = gesture  # Save this gesture for later comparison
                     # If the new gesture is not recognized, reset the state
                     else:
                         self.state = self.STATE_NONE  # Transition back to the none state
+                        self.curr_buttons = 0x00  # Reset the current button bitmask
                         self.prev_gesture = None  # Reset the previous gesture
                 # Else, continue pressing the mouse button
+
+    def move_mouse(self, dx, dy):
+        """
+        Move the mouse while preserving the current button state.
+
+        Args:
+            dx (float): Pixels to move in X direction.
+            dy (float): Pixels to move in Y direction.
+        """
+        self.hid.move_mouse(int(dx), int(dy), buttons=self.curr_buttons)
 
 class KeyboardFSM:
     """
