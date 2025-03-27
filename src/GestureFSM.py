@@ -34,7 +34,7 @@ class HIDToggleFSM:
     """
     FSM to recognize a sequence of gestures:
     open_hand -> closed_fist -> open_hand -> closed_fist -> open_hand
-    within a 3-second window to toggle HID control on or off.
+    within a 2-second window to toggle HID control on or off.
     """
     # FSM State Names
     STATE_IDLE = 0
@@ -61,7 +61,7 @@ class HIDToggleFSM:
         curr_time = time.time()
 
         # Reset the state if timeout occurs
-        if (self.last_update_time is not None) and (curr_time - self.last_update_time > 3.0):
+        if (self.last_update_time is not None) and (curr_time - self.last_update_time > 2.0):
             self.state = self.STATE_IDLE
 
         # Match the current state and update based on gesture
