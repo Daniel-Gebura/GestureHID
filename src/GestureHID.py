@@ -32,14 +32,14 @@ R_MODEL_PATH = "../models/mini_right_multiclass_gesture_classifier.pth"
 L_MODEL_PATH = "../models/mini_left_multiclass_gesture_classifier.pth"
 
 # MediaPipe Hands Settings
-MPH_DETECTION_CONFIDENCE = 0.9
+MPH_DETECTION_CONFIDENCE = 0.85
 MPH_TRACKING_CONFIDENCE = 0.6
 
 # Gesture Classification Settings
 GESTURE_CONFIDENCE = 0.3
 
 # Mouse Control Settings
-MOUSE_SENSITIVITY = 1000
+MOUSE_SENSITIVITY = 1500
 MOUSE_TRACKING_LANDMARK = 0  # Wrist
 
 # Camera Settings
@@ -117,7 +117,7 @@ def normalize_landmarks(landmarks):
     # Check for faulty landmarks
     if len(landmarks) != 63:
         return np.zeros(63, dtype=np.float32)
-    
+
     landmarks = np.array(landmarks).reshape(21, 3)  # Convert to a 21x3 NumPy array
     wrist = landmarks[0]  # Extract wrist coordinates (reference point)
     landmarks -= wrist  # Translate all landmarks relative to the wrist

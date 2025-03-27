@@ -9,7 +9,7 @@
 ################################################################
 
 import time
-from hid_controller import HIDController, MOUSE_LEFT, MOUSE_RIGHT, KEYCODES
+from HIDController import HIDController, MOUSE_LEFT, MOUSE_RIGHT, KEYCODES
 
 # Constants ---------------------------------------------------------
 
