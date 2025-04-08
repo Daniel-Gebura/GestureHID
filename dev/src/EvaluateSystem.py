@@ -1,13 +1,18 @@
 ################################################################
-# EvaluateSystem.py
+# ComprehensiveEvaluation.py
 #
-# Description: This script evaluates gesture classification accuracy
-# and latency across multiple parameters:
-# - MediaPipe tracking confidence levels
-# - MLP hidden layer sizes
-# - Gesture confidence thresholds
+# Description:
+# A complete evaluation script to analyze gesture classification
+# performance and latency across:
+# 1. Varying Model Sizes
+# 2. Varying Tracking Confidences
+# 3. Varying Gesture Confidence Thresholds
 #
-# Results are saved as plots in ../results/
+# Metrics:
+# - Per-class and overall accuracy
+# - Latency breakdown (MediaPipe + Classifier)
+# - Accuracy vs Latency
+# - Raw data CSV for future analysis
 #
 # Author: Daniel Gebura
 ################################################################
@@ -17,25 +22,23 @@ import cv2
 import time
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
-from tqdm import tqdm
+import matplotlib.pyplot as plt
 import seaborn as sns
+from tqdm import tqdm
 import mediapipe as mp
 from collections import defaultdict
 from Model import GestureClassifier
 
-# Device Optimization -----------------------------------------------
-
-torch.backends.cudnn.benchmark = True  # Enable faster CUDA optimizations
-torch.backends.cudnn.deterministic = False  # Avoid strict determinism for speed
-torch.set_grad_enabled(False)  # Disable autograd to save computation
-
-# Configuration Constants -------------------------------------------
+# ---------------- Configuration ----------------
 VIDEO_PATH = "../labeled_videos/simple_all_gestures/video.mp4"
 LEFT_LABEL_CSV = "../labeled_videos/simple_all_gestures/left_labels.csv"
 RIGHT_LABEL_CSV = "../labeled_videos/simple_all_gestures/right_labels.csv"
 RESULTS_DIR = "../results"
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+LEFT_LABELS = ["forward_point", "back_point", "left_point", "right_point", "open_hand", "index_thumb"]
+RIGHT_LABELS = ["closed_fist", "open_hand", "thumbs_up", "index_thumb", "pinky_thumb", "thumbs_down"]
 
 RIGHT_MODELS = {
     64: "../models/right_multiclass_gesture_classifier.pth",
@@ -49,28 +52,21 @@ LEFT_MODELS = {
     16: "../models/mini_left_multiclass_gesture_classifier.pth",
 }
 
-# MediaPipe tracking confidence settings
-TRACKING_CONFIDENCES = [0.4, 0.5, 0.6, 0.7]
-
-# Gesture classifier output probability thresholds
-GESTURE_CONF_THRESHOLDS = [0.1, 0.2, 0.3]
-
-LEFT_LABELS = ["forward_point", "back_point", "left_point", "right_point", "open_hand", "index_thumb"]
-RIGHT_LABELS = ["closed_fist", "open_hand", "thumbs_up", "index_thumb", "pinky_thumb", "thumbs_down"]
+TRACKING_CONFIDENCES = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+GESTURE_CONF_THRESHOLDS = [0.1, 0.2, 0.3, 0.4]
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# ------------------------------------------------------------------
+# Device Optimization -----------------------------------------------
+
+torch.backends.cudnn.benchmark = True  # Enable faster CUDA optimizations
+torch.backends.cudnn.deterministic = False  # Avoid strict determinism for speed
+torch.set_grad_enabled(False)  # Disable autograd to save computation
+
+# ---------------- Utility Functions ----------------
 def normalize_landmarks(landmarks):
     """
     Normalize hand landmark coordinates relative to the wrist.
-
-    Args:
-        landmarks (list or np.ndarray): List of 63 float values representing 21 (x, y, z) coordinates.
-
-    Returns:
-        np.ndarray: Flattened 63-value array normalized by the wrist and largest distance.
     """
     landmarks = np.array(landmarks).reshape(21, 3)
     wrist = landmarks[0]
@@ -80,15 +76,7 @@ def normalize_landmarks(landmarks):
 
 def load_model(path, hidden_size, output_size):
     """
-    Load a pre-trained gesture classifier model.
-
-    Args:
-        path (str): Path to the saved .pth model.
-        hidden_size (int): Size of the model's hidden layer.
-        output_size (int): Number of gesture classes.
-
-    Returns:
-        model (torch.nn.Module): Loaded and ready PyTorch model.
+    Load a pre-trained PyTorch model for gesture classification.
     """
     model = GestureClassifier(hidden_size=hidden_size, output_size=output_size).to(DEVICE)
     model.load_state_dict(torch.load(path, map_location=DEVICE))
@@ -96,81 +84,56 @@ def load_model(path, hidden_size, output_size):
     model.half()
     return model
 
-# ------------------------------------------------------------------
-def evaluate_combination(tracking_conf, hidden_size, left_model_path, right_model_path, gesture_conf):
+def evaluate(video_path, left_csv, right_csv, left_model_path, right_model_path,
+             hidden_size, track_conf, gesture_conf, experiment_type, experiment_value):
     """
-    Evaluate gesture classification accuracy and latency on labeled video frames.
-
-    Args:
-        tracking_conf (float): Tracking confidence for MediaPipe Hands.
-        hidden_size (int): Hidden layer size of the MLP model.
-        left_model_path (str): Path to the left hand gesture classifier.
-        right_model_path (str): Path to the right hand gesture classifier.
-        gesture_conf (float): Confidence threshold for gesture predictions.
-
-    Returns:
-        dict: A dictionary containing the following keys:
-            - "left_acc" (float): Left hand classification accuracy.
-            - "right_acc" (float): Right hand classification accuracy.
-            - "mp_latency" (float): Average MediaPipe processing latency (in ms).
-            - "model_latency" (float): Average model inference latency (in ms).
-            - "total_latency" (float): Average total latency (in ms).
-            - "per_class_acc" (dict): Per-class accuracy for each gesture class.
+    Evaluate classification performance and latency for one configuration.
     """
     mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        min_detection_confidence=0.9,
-        min_tracking_confidence=tracking_conf
-    )
+    hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2,
+                           min_detection_confidence=0.9,
+                           min_tracking_confidence=track_conf)
 
-    cap = cv2.VideoCapture(VIDEO_PATH)
+    cap = cv2.VideoCapture(video_path)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    left_labels = pd.read_csv(LEFT_LABEL_CSV).set_index('frame')['label'].to_dict()
-    right_labels = pd.read_csv(RIGHT_LABEL_CSV).set_index('frame')['label'].to_dict()
+    left_labels = pd.read_csv(left_csv).set_index('frame')['label'].to_dict()
+    right_labels = pd.read_csv(right_csv).set_index('frame')['label'].to_dict()
 
     model_left = load_model(left_model_path, hidden_size, len(LEFT_LABELS))
     model_right = load_model(right_model_path, hidden_size, len(RIGHT_LABELS))
 
-    correct_left, correct_right = 0, 0
-    total_left, total_right = 0, 0
-    mediapipe_latencies, model_latencies, total_latencies = [], [], []
+    total_latency, mp_latencies, model_latencies = [], [], []
+    correct_left, correct_right, total_left, total_right = 0, 0, 0, 0
+    class_correct, class_total = defaultdict(int), defaultdict(int)
 
-    class_correct = defaultdict(int)
-    class_total = defaultdict(int)
-
-    for frame_idx in tqdm(range(frame_count)):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    for idx in tqdm(range(frame_count)):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ret, frame = cap.read()
-        if not ret:
-            continue
+        if not ret: continue
+        frame = cv2.resize(frame, (320, 240))
+        rgb = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
 
-        frame = cv2.flip(frame, 1)
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # Start total timing
         total_start = time.time()
-
-        # MediaPipe timing
         mp_start = time.time()
-        results = hands.process(rgb_frame)
-        mp_latency = (time.time() - mp_start) * 1000
+        results = hands.process(rgb)
+        mp_time = (time.time() - mp_start) * 1000
 
-        pred_left, pred_right = None, None
-
-        # Gesture classifier timing
+        pred_left, pred_right = "open_hand", "open_hand"
         model_start = time.time()
+
         if results.multi_hand_landmarks:
-            for i, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                handedness = results.multi_handedness[i].classification[0].label
-                landmarks = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark]).flatten()
-                norm = normalize_landmarks(landmarks)
+            for i, lm in enumerate(results.multi_hand_landmarks):
+                side = results.multi_handedness[i].classification[0].label
+                norm = normalize_landmarks([l.x for l in lm.landmark] +
+                                           [l.y for l in lm.landmark] +
+                                           [l.z for l in lm.landmark])
                 x = torch.tensor(norm, dtype=torch.float16).unsqueeze(0).to(DEVICE)
 
                 with torch.no_grad():
-                    if handedness == 'Left':
+                    if side == 'Left':
                         out = model_left(x)
                         probs = torch.softmax(out, dim=1)[0]
                         conf = probs.max().item()
@@ -182,127 +145,112 @@ def evaluate_combination(tracking_conf, hidden_size, left_model_path, right_mode
                         conf = probs.max().item()
                         if conf >= gesture_conf:
                             pred_right = RIGHT_LABELS[torch.argmax(probs).item()]
-        model_latency = (time.time() - model_start) * 1000
-        total_latency = (time.time() - total_start) * 1000
 
-        # Accuracy checks and logging
-        if frame_idx in left_labels:
+        model_time = (time.time() - model_start) * 1000
+        total_time = (time.time() - total_start) * 1000
+
+        # Accuracy
+        if idx in left_labels:
             total_left += 1
-            true_label = left_labels[frame_idx]
-            class_total[true_label] += 1
-            if pred_left == true_label:
+            true = left_labels[idx]
+            class_total[true] += 1
+            if pred_left == true:
                 correct_left += 1
-                class_correct[true_label] += 1
+                class_correct[true] += 1
 
-        if frame_idx in right_labels:
+        if idx in right_labels:
             total_right += 1
-            true_label = right_labels[frame_idx]
-            class_total[true_label] += 1
-            if pred_right == true_label:
+            true = right_labels[idx]
+            class_total[true] += 1
+            if pred_right == true:
                 correct_right += 1
-                class_correct[true_label] += 1
+                class_correct[true] += 1
 
-        mediapipe_latencies.append(mp_latency)
-        model_latencies.append(model_latency)
-        total_latencies.append(total_latency)
+        mp_latencies.append(mp_time)
+        model_latencies.append(model_time)
+        total_latency.append(total_time)
 
     cap.release()
     hands.close()
 
     return {
+        "experiment": experiment_type,
+        "value": experiment_value,
+        "hidden_size": hidden_size,
+        "tracking_conf": track_conf,
+        "gesture_conf": gesture_conf,
         "left_acc": correct_left / total_left if total_left else 0,
         "right_acc": correct_right / total_right if total_right else 0,
-        "mp_latency": np.mean(mediapipe_latencies),
+        "overall_acc": (correct_left + correct_right) / (total_left + total_right),
+        "mp_latency": np.mean(mp_latencies),
         "model_latency": np.mean(model_latencies),
-        "total_latency": np.mean(total_latencies),
-        "per_class_acc": {cls: class_correct[cls] / class_total[cls] if class_total[cls] else 0 for cls in class_total}
+        "total_latency": np.mean(total_latency),
+        "mp_var": np.var(mp_latencies),
+        "model_var": np.var(model_latencies),
+        "classes": dict({k: class_correct[k] / class_total[k] if class_total[k] else 0 for k in class_total})
     }
 
-# ------------------------------------------------------------------
-def main():
-    """
-    Run all experimental combinations and generate result plots.
-    """
-    all_results = []
-    per_class_accuracy_records = []
+# ---------------- Plotting and Main Logic ----------------
+def run_experiments():
+    results = []
+    # 1. Model size sweep
+    for size in [64, 32, 16]:
+        results.append(evaluate(VIDEO_PATH, LEFT_LABEL_CSV, RIGHT_LABEL_CSV,
+                                LEFT_MODELS[size], RIGHT_MODELS[size],
+                                size, 0.5, 0.3, "model_size", size))
+    # 2. Tracking confidence sweep
+    for conf in TRACKING_CONFIDENCES:
+        results.append(evaluate(VIDEO_PATH, LEFT_LABEL_CSV, RIGHT_LABEL_CSV,
+                                LEFT_MODELS[16], RIGHT_MODELS[16],
+                                16, conf, 0.3, "tracking_conf", conf))
+    # 3. Gesture confidence sweep
+    for gconf in GESTURE_CONF_THRESHOLDS:
+        results.append(evaluate(VIDEO_PATH, LEFT_LABEL_CSV, RIGHT_LABEL_CSV,
+                                LEFT_MODELS[16], RIGHT_MODELS[16],
+                                16, 0.6, gconf, "gesture_conf", gconf))
 
-    for gesture_conf in GESTURE_CONF_THRESHOLDS:
-        for tracking_conf in TRACKING_CONFIDENCES:
-            for hidden_size in LEFT_MODELS:
-                result = evaluate_combination(
-                    tracking_conf,
-                    hidden_size,
-                    LEFT_MODELS[hidden_size],
-                    RIGHT_MODELS[hidden_size],
-                    gesture_conf
-                )
-                result.update({
-                    "tracking_conf": tracking_conf,
-                    "hidden_size": hidden_size,
-                    "gesture_conf": gesture_conf
-                })
-                all_results.append(result)
+    df = pd.DataFrame(results)
+    df.to_csv(os.path.join(RESULTS_DIR, "evaluation_data.csv"), index=False)
 
-                # Flatten per-class accuracies
-                for cls, acc in result["per_class_acc"].items():
-                    per_class_accuracy_records.append({
-                        "gesture": cls,
-                        "accuracy": acc,
-                        "tracking_conf": tracking_conf,
-                        "hidden_size": hidden_size,
-                        "gesture_conf": gesture_conf
-                    })
+    # -- Plot 1: Per-class + overall accuracy --
+    class_acc = []
+    for row in results:
+        for cls, acc in row["classes"].items():
+            class_acc.append({"class": cls, "accuracy": acc, "type": "Per-Class", "group": row["experiment"], "value": row["value"]})
+        class_acc.append({"class": "left_overall", "accuracy": row["left_acc"], "type": "Overall", "group": row["experiment"], "value": row["value"]})
+        class_acc.append({"class": "right_overall", "accuracy": row["right_acc"], "type": "Overall", "group": row["experiment"], "value": row["value"]})
 
-    df = pd.DataFrame(all_results)
-    df_classes = pd.DataFrame(per_class_accuracy_records)
-
-    # === Plots ===
-    sns.set(style="whitegrid")
-
-    # Left Accuracy vs Latency
-    plt.figure()
-    sns.lineplot(data=df, x="total_latency", y="left_acc", hue="hidden_size", style="gesture_conf")
-    plt.title("Left Hand Accuracy vs Total Latency")
-    plt.xlabel("Latency (ms)")
-    plt.ylabel("Accuracy")
-    plt.legend(title="Hidden Layer")
-    plt.savefig(os.path.join(RESULTS_DIR, "left_accuracy_vs_latency.png"))
-
-    # Right Accuracy vs Latency
-    plt.figure()
-    sns.lineplot(data=df, x="total_latency", y="right_acc", hue="hidden_size", style="gesture_conf")
-    plt.title("Right Hand Accuracy vs Total Latency")
-    plt.xlabel("Latency (ms)")
-    plt.ylabel("Accuracy")
-    plt.legend(title="Hidden Layer")
-    plt.savefig(os.path.join(RESULTS_DIR, "right_accuracy_vs_latency.png"))
-
-    # Per-Class Accuracy Bar Plot
-    plt.figure(figsize=(10, 6))
-    sns.barplot(data=df_classes, x="gesture", y="accuracy")
-    plt.title("Average Accuracy per Gesture Class")
-    plt.ylabel("Accuracy")
+    df_classes = pd.DataFrame(class_acc)
+    plt.figure(figsize=(12, 6))
+    sns.barplot(data=df_classes, x="class", y="accuracy", hue="type")
+    plt.title("Gesture Accuracy (Class + Overall)")
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "per_class_accuracy.png"))
+    plt.savefig(os.path.join(RESULTS_DIR, "per_class_and_overall_accuracy.png"))
 
-    # Latency breakdown
+    # -- Plot 2: Latency variance bar plot --
+    plt.figure(figsize=(10, 6))
+    df["config"] = df["experiment"] + "_" + df["value"].astype(str)
+    sns.barplot(data=df, x="config", y="mp_latency", yerr=df["mp_var"]**0.5, label="MediaPipe")
+    sns.barplot(data=df, x="config", y="model_latency", yerr=df["model_var"]**0.5, label="Classifier", bottom=df["mp_latency"])
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.ylabel("Latency (ms)")
+    plt.title("Latency Breakdown with Variance")
+    plt.tight_layout()
+    plt.savefig(os.path.join(RESULTS_DIR, "latency_variance_stacked_bar.png"))
+
+    # -- Plot 3: Overall Accuracy vs Total Latency --
     plt.figure()
-    df_melt = df.melt(id_vars=["hidden_size", "gesture_conf"], value_vars=["mp_latency", "model_latency", "total_latency"],
-                      var_name="Latency Component", value_name="Milliseconds")
-    sns.barplot(data=df_melt, x="Latency Component", y="Milliseconds", hue="hidden_size")
-    plt.title("Average Latency Components by Model Size")
-    plt.savefig(os.path.join(RESULTS_DIR, "latency_breakdown.png"))
+    sns.scatterplot(data=df, x="total_latency", y="overall_acc", hue="experiment", style="value", s=150)
+    plt.title("Overall Accuracy vs Total Latency")
+    plt.xlabel("Total Latency (ms)")
+    plt.ylabel("Overall Accuracy")
+    plt.tight_layout()
+    plt.savefig(os.path.join(RESULTS_DIR, "overall_accuracy_vs_latency.png"))
 
-    print("[INFO] Evaluation complete. Plots saved to ../results/")
+    print("[INFO] All experiments completed. Results saved to ../results/")
 
-    # Save raw results to CSV
-    df.to_csv(os.path.join(RESULTS_DIR, "full_evaluation_results.csv"), index=False)
-    df_classes.to_csv(os.path.join(RESULTS_DIR, "per_class_accuracy_results.csv"), index=False)
-
-    print("[INFO] Data saved to CSV for future analysis.")
-
-
-# ------------------------------------------------------------------
+# ---------------- Run Everything ----------------
 if __name__ == "__main__":
-    main()
+    run_experiments()
