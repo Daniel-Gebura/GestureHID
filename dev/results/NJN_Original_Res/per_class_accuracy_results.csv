@@ -1,0 +1,11 @@
+gesture,accuracy,tracking_conf,hidden_size,gesture_conf
+open_hand,0.9913362212595801,0.4,16,0.1
+forward_point,0.8866666666666667,0.4,16,0.1
+back_point,0.9658119658119658,0.4,16,0.1
+right_point,0.9888888888888889,0.4,16,0.1
+left_point,0.896551724137931,0.4,16,0.1
+index_thumb,0.98,0.4,16,0.1
+closed_fist,0.9821428571428571,0.4,16,0.1
+thumbs_up,1.0,0.4,16,0.1
+thumbs_down,0.8857142857142857,0.4,16,0.1
+pinky_thumb,1.0,0.4,16,0.1

@@ -1,0 +1,2 @@
+left_acc,right_acc,mp_latency,model_latency,total_latency,per_class_acc,tracking_conf,hidden_size,gesture_conf
+0.9791563275434243,0.9836228287841191,82.89197396403803,20.58038013448786,103.48136620249404,"{'open_hand': 0.9913362212595801, 'forward_point': 0.8866666666666667, 'back_point': 0.9658119658119658, 'right_point': 0.9888888888888889, 'left_point': 0.896551724137931, 'index_thumb': 0.98, 'closed_fist': 0.9821428571428571, 'thumbs_up': 1.0, 'thumbs_down': 0.8857142857142857, 'pinky_thumb': 1.0}",0.4,16,0.1
