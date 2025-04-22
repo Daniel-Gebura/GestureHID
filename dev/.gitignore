@@ -48,3 +48,11 @@ Thumbs.db
 
 # Results
 results/
+
+# Evaluation
+labeled_videos/
+src/evaluate_models.py
+Scripts/*
+
+# But do not ignore DatasetCreation.py
+!Scripts/DatasetCreation.py
