@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 ################################################################
 # GestureHID.py
 #
@@ -139,7 +140,7 @@ def main():
     toggle_fsm = HIDToggleFSM()  # State machine to toggle HID control on/off
     mouse_fsm = MouseFSM(sensitivity=MOUSE_SENSITIVITY)  # State machine to control mouse
     keyboard_fsm = KeyboardFSM()  # State machine to control keyboard press/release
-    hid_enabled = True  # HID control is initially enabled
+    hid_enabled = False  # HID control is initially disabled
     prev_track_coords = None  # Track the previous frame's tracking coordinates 
 
     # Initialize webcam and mediapipe hands model
