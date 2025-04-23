@@ -33,18 +33,17 @@ MOUSE_MAP = {
 class HIDToggleFSM:
     """
     FSM to recognize a sequence of gestures:
-    open_hand -> closed_fist -> open_hand -> closed_fist -> open_hand
+    open_hand -> closed_fist -> open_hand -> closed_fist -> open_hand -> closed_fist -> open_hand
     within a 2-second window to toggle HID control on or off.
     """
-    # FSM State Names
-    STATE_IDLE = 0
-    STATE_FIRST_OPEN = 1
-    STATE_FIRST_FIST = 2
-    STATE_SECOND_OPEN = 3
-    STATE_SECOND_FIST = 4
-
     def __init__(self):
-        self.state = self.STATE_IDLE
+        self._reset()
+
+    def _reset(self):
+        """
+        Reset the FSM to its initial state.
+        """
+        self.sequence_step = 0
         self.last_update_time = None
 
     def update(self, gesture):
@@ -61,30 +60,20 @@ class HIDToggleFSM:
         curr_time = time.time()
 
         # Reset the state if timeout occurs
-        if (self.last_update_time is not None) and (curr_time - self.last_update_time > 2.0):
-            self.state = self.STATE_IDLE
+        if self.last_update_time is not None and (curr_time - self.last_update_time > 2.0):
+            self._reset()
 
-        # Match the current state and update based on gesture
-        if self.state == self.STATE_IDLE:
-            if gesture == "open_hand":
-                self.state = self.STATE_FIRST_OPEN
-                self.last_update_time = curr_time
-        elif self.state == self.STATE_FIRST_OPEN:
-            if gesture == "closed_fist":
-                self.state = self.STATE_FIRST_FIST
-        elif self.state == self.STATE_FIRST_FIST:
-            if gesture == "open_hand":
-                self.state = self.STATE_SECOND_OPEN
-        elif self.state == self.STATE_SECOND_OPEN:
-            if gesture == "closed_fist":
-                self.state = self.STATE_SECOND_FIST
-        elif self.state == self.STATE_SECOND_FIST:
-            if gesture == "open_hand":
-                self.state = self.STATE_IDLE
+        expected_gesture = "open_hand" if self.sequence_step % 2 == 0 else "closed_fist"
+
+        if gesture == expected_gesture:
+            self.sequence_step += 1
+            self.last_update_time = curr_time
+
+            if self.sequence_step == 7:
+                self._reset()
                 return True
-        else:
-            if gesture not in ["open_hand", "closed_fist", "None"]:
-                self.state = self.STATE_IDLE
+        elif gesture not in ["open_hand", "closed_fist", "None"]:
+            self._reset()
 
         return False
 
