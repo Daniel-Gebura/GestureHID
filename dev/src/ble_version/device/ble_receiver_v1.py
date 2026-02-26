@@ -114,6 +114,7 @@ uart_advertisement = ProvideServicesAdvertisement(uart)  # Create advertisement 
 
 ALLOWED_CENTRAL_ADDRESS = None   # Cache the first connected central address until reset
 SESSION_AUTHENTICATED  = False  # Require lightweight auth before processing HID commands
+WAS_CONNECTED = False          # Track if we've ever been connected since last reset (for allow-list logic)
 
 
 # ----------------------------------------------------------------------
@@ -408,6 +409,26 @@ def _route_command(cmd):
         raise ValueError("Command 'type' must be 'keyboard' or 'mouse'")
 
 
+def _cleanup_hid_state():
+    """
+    Description:
+        Force-release all keyboard keys and mouse buttons.
+        This prevents stuck keys/buttons if BLE disconnects mid-command.
+    """
+    try:
+        keyboard.release_all()
+    except Exception:
+        pass
+
+    try:
+        # Release all mouse buttons explicitly
+        mouse.release(Mouse.LEFT_BUTTON)
+        mouse.release(Mouse.RIGHT_BUTTON)
+        mouse.release(Mouse.MIDDLE_BUTTON)
+    except Exception:
+        pass
+
+
 def _handle_auth_command(cmd):
     """
     Description:
@@ -451,6 +472,13 @@ def _handle_auth_command(cmd):
 
 # Outer loop runs forever
 while True:
+    
+    # Detect disconnect transition and cleanup
+    if WAS_CONNECTED and not ble.connected:
+        _cleanup_hid_state()
+        SESSION_AUTHENTICATED = False
+
+    WAS_CONNECTED = ble.connected
     # If disconnected, (re)start advertising and wait for a central
     if not ble.connected:
         # Reset per-connection auth state (but keep allow-list cached until reset)
