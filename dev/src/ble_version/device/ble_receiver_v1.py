@@ -30,7 +30,9 @@ from adafruit_hid.mouse import Mouse
 
 DEVICE_NAME  = "HID-Proxy-Control"  # BLE advertising name
 JSON_MAX_LEN = 512                  # Safety cap on incoming line size
-IDLE_SLEEP_S = 0.001                # Delay (seconds) between BLE polls
+MOUSE_DELTA_MIN = -127              # Minimum value for mouse movement deltas and wheel
+MOUSE_DELTA_MAX = 127               # Maximum value for mouse movement deltas and wheel
+IDLE_SLEEP_S = 0.01                 # Delay (seconds) between BLE polls
 
 REQUIRE_BONDING = True              # Require BLE pairing/bonding before accepting commands
 AUTH_TOKEN      = "CHANGE_ME"       # Lightweight shared secret for command authorization
@@ -338,6 +340,21 @@ def _handle_keyboard_command(cmd: dict) -> None:
     raise ValueError(f"Unknown keyboard action: {action!r}")
 
 
+def _clamp(value, min_value, max_value):
+    """
+    Description:
+        Clamp an integer value into the inclusive range [min_value, max_value].
+
+    Returns:
+        Clamped integer.
+    """
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
 def _handle_mouse_command(cmd: dict) -> None:
     """
     Description:
@@ -360,12 +377,15 @@ def _handle_mouse_command(cmd: dict) -> None:
     # Extract the action field for this command
     action = cmd.get("action")
 
-    # Move: Move the cursor and/or wheel
     if action == "move":
-        dx = int(cmd.get("dx", 0))  # Get horizontal delta (default 0)
-        dy = int(cmd.get("dy", 0))  # Get vertical delta (default 0)
-        wheel = int(cmd.get("wheel", 0))  # Get wheel delta (default 0)
-        mouse.move(dx=dx, dy=dy, wheel=wheel)  # Move the mouse accordingly
+        dx = int(cmd.get("dx", 0))
+        dy = int(cmd.get("dy", 0))
+        wheel = int(cmd.get("wheel", 0))
+        # Clamp to valid USB HID boot protocol range
+        dx = _clamp(dx, MOUSE_DELTA_MIN, MOUSE_DELTA_MAX)
+        dy = _clamp(dy, MOUSE_DELTA_MIN, MOUSE_DELTA_MAX)
+        wheel = _clamp(wheel, MOUSE_DELTA_MIN, MOUSE_DELTA_MAX)
+        mouse.move(dx=dx, dy=dy, wheel=wheel)
         return
 
     # Button Commands: Click, press, or release a button
@@ -472,7 +492,7 @@ def _handle_auth_command(cmd):
 
 # Outer loop runs forever
 while True:
-    
+
     # Detect disconnect transition and cleanup
     if WAS_CONNECTED and not ble.connected:
         _cleanup_hid_state()
