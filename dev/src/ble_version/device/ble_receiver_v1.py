@@ -32,6 +32,9 @@ DEVICE_NAME  = "HID-Proxy-Control"  # BLE advertising name
 JSON_MAX_LEN = 512                  # Safety cap on incoming line size
 IDLE_SLEEP_S = 0.001                # Delay (seconds) between BLE polls
 
+REQUIRE_BONDING = True              # Require BLE pairing/bonding before accepting commands
+AUTH_TOKEN      = "CHANGE_ME"       # Lightweight shared secret for command authorization
+
 
 # ----------------------------------------------------------------------
 # HID Setup
@@ -106,8 +109,149 @@ uart_advertisement = ProvideServicesAdvertisement(uart)  # Create advertisement 
 
 
 # ----------------------------------------------------------------------
+# Connection Security State
+# ----------------------------------------------------------------------
+
+ALLOWED_CENTRAL_ADDRESS = None   # Cache the first connected central address until reset
+SESSION_AUTHENTICATED  = False  # Require lightweight auth before processing HID commands
+
+
+# ----------------------------------------------------------------------
 # Helper Function Definitions
 # ----------------------------------------------------------------------
+
+def _get_active_connection():
+    """
+    Description:
+        Return the first active BLE connection, or None if not connected.
+
+    Returns:
+        A BLEConnection or None
+    """
+    try:
+        conns = ble.connections
+        if conns and conns[0] is not None and conns[0].connected:
+            return conns[0]
+    except Exception:
+        pass
+    return None
+
+
+def _format_address_hex(addr_obj):
+    """
+    Description:
+        Convert a _bleio.Address (or similar) into a stable hex string.
+
+    Notes:
+        We avoid relying on any one property name too strongly; CircuitPython BLE APIs
+        have evolved and some attributes differ across versions.
+
+    Returns:
+        A string like "AA:BB:CC:DD:EE:FF" or None if unavailable.
+    """
+    # 1) Best case: str(address) returns human-readable address on many builds
+    try:
+        s = str(addr_obj)
+        if s and ":" in s:
+            return s.upper()
+    except Exception:
+        pass
+
+    # 2) Try raw bytes on address-like objects (rarely needed)
+    try:
+        b = bytes(addr_obj)
+        if b and len(b) == 6:
+            return ":".join("{:02X}".format(x) for x in b[::-1])
+    except Exception:
+        pass
+
+    return None
+
+
+def _get_connection_address_str(connection):
+    """
+    Description:
+        Get the peer (central) address string for a given BLEConnection.
+
+    Returns:
+        Address string "AA:BB:CC:DD:EE:FF" or None if not available.
+    """
+    # The BLEConnection wraps an internal _bleio.Connection. Many builds expose it as _bleio_connection.
+    try:
+        bleio_conn = getattr(connection, "_bleio_connection", None)
+        if bleio_conn is not None:
+            addr = getattr(bleio_conn, "address", None)
+            if addr is not None:
+                return _format_address_hex(addr)
+    except Exception:
+        pass
+
+    return None
+
+
+def _enforce_connection_security(connection):
+    """
+    Description:
+        Enforce bonding + allow-list (cached central address) for the active connection.
+
+    Behavior:
+        - If bonding is required, attempt to pair(bond=True). Disconnect if pairing fails.
+        - If this is the first-ever central since reset, cache its address and accept it.
+        - If a different central connects later, immediately disconnect it.
+
+    Returns:
+        True if the connection is allowed, False if it was rejected.
+    """
+    global ALLOWED_CENTRAL_ADDRESS
+
+    # 1) Require pairing/bonding (best effort, but enforced if enabled)
+    if REQUIRE_BONDING:
+        try:
+            if not connection.paired:
+                connection.pair(bond=True)
+        except Exception:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
+            return False
+
+        # If pairing didn't "stick", treat as failure
+        try:
+            if not connection.paired:
+                connection.disconnect()
+            return bool(connection.paired)
+        except Exception:
+            try:
+                connection.disconnect()
+            except Exception:
+                pass
+            return False
+
+    # 2) Allow-list enforcement (cache first central address until reset)
+    peer_addr = _get_connection_address_str(connection)
+    if peer_addr is None:
+        # If we can't read the address, we cannot safely enforce allow-listing.
+        # In this case, fail closed (disconnect) because you explicitly asked to refuse others.
+        try:
+            connection.disconnect()
+        except Exception:
+            pass
+        return False
+
+    if ALLOWED_CENTRAL_ADDRESS is None:
+        ALLOWED_CENTRAL_ADDRESS = peer_addr
+        return True
+
+    if peer_addr != ALLOWED_CENTRAL_ADDRESS:
+        try:
+            connection.disconnect()
+        except Exception:
+            pass
+        return False
+
+    return True
+
 
 def _resolve_keycodes_from_names(key_name_list):
     """
@@ -264,6 +408,43 @@ def _route_command(cmd):
         raise ValueError("Command 'type' must be 'keyboard' or 'mouse'")
 
 
+def _handle_auth_command(cmd):
+    """
+    Description:
+        Lightweight session authorization.
+
+    Supported patterns:
+        1) Explicit auth command:
+            {"type":"auth","token":"..."}
+        2) Inline auth field on any command BEFORE authenticated:
+            {"type":"keyboard", ... , "auth":"..."}
+
+    Returns:
+        True if authentication succeeded, False otherwise.
+    """
+    global SESSION_AUTHENTICATED
+
+    # Already authorized this session
+    if SESSION_AUTHENTICATED:
+        return True
+
+    # Explicit auth command
+    if cmd.get("type") == "auth":
+        token = cmd.get("token", None)
+        if isinstance(token, str) and token == AUTH_TOKEN:
+            SESSION_AUTHENTICATED = True
+            return True
+        return False
+
+    # Inline auth field on first command(s)
+    token = cmd.get("auth", None)
+    if isinstance(token, str) and token == AUTH_TOKEN:
+        SESSION_AUTHENTICATED = True
+        return True
+
+    return False
+
+
 # ----------------------------------------------------------------------
 # Main Loop
 # ----------------------------------------------------------------------
@@ -272,6 +453,9 @@ def _route_command(cmd):
 while True:
     # If disconnected, (re)start advertising and wait for a central
     if not ble.connected:
+        # Reset per-connection auth state (but keep allow-list cached until reset)
+        SESSION_AUTHENTICATED = False
+
         # 1. Start advertising (ignore errors)
         try:
             ble.start_advertising(uart_advertisement)
@@ -289,7 +473,22 @@ while True:
         except Exception:
             # Ignore failures in stopping advertising
             pass
-        print("Central connected.")
+
+        # 4. Enforce bonding + allow-listing for the newly connected central
+        conn = _get_active_connection()
+        if conn is None:
+            # If we cannot resolve the connection object, fail closed.
+            try:
+                ble.stop_advertising()
+            except Exception:
+                pass
+            continue
+
+        if not _enforce_connection_security(conn):
+            # Rejected: drop back to advertising loop
+            continue
+
+        print("Central connected (secured).")
 
     # While connected, continually read and process newline-delimited JSON commands
     while ble.connected:
@@ -307,6 +506,22 @@ while True:
         try:
             # Decode bytes -> str, strip whitespace/newline, parse JSON
             cmd = json.loads(raw_line_bytes.decode("utf-8").strip())
+
+            # Enforce lightweight auth gating before any HID actions
+            if not _handle_auth_command(cmd):
+                try:
+                    uart.write(b'{"ok":false,"error":"unauthorized"}\n')
+                except Exception:
+                    pass
+                continue
+
+            # If this was an explicit auth command, acknowledge and continue
+            if cmd.get("type") == "auth":
+                try:
+                    uart.write(b'{"ok":true,"authed":true}\n')
+                except Exception:
+                    pass
+                continue
 
             # Execute and acknowledge success
             _route_command(cmd)
