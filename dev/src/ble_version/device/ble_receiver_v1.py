@@ -28,9 +28,9 @@ from adafruit_hid.mouse import Mouse
 # Configuration Variables
 # ----------------------------------------------------------------------
 
-DEVICE_NAME: str = "HID-Proxy-Control"  # BLE advertising name
-JSON_MAX_LEN: int = 512                 # Safety cap on incoming line size
-IDLE_SLEEP_S: float = 0.001             # Delay (seconds) between BLE polls
+DEVICE_NAME  = "HID-Proxy-Control"  # BLE advertising name
+JSON_MAX_LEN = 512                  # Safety cap on incoming line size
+IDLE_SLEEP_S = 0.001                # Delay (seconds) between BLE polls
 
 
 # ----------------------------------------------------------------------
@@ -109,7 +109,7 @@ uart_advertisement = ProvideServicesAdvertisement(uart)  # Create advertisement 
 # Helper Function Definitions
 # ----------------------------------------------------------------------
 
-def _resolve_keycodes_from_names(key_name_list: list[str]) -> list[int]:
+def _resolve_keycodes_from_names(key_name_list):
     """
     Description:
         Resolve a list of key name strings into a list of Keycode integer values.
@@ -123,7 +123,7 @@ def _resolve_keycodes_from_names(key_name_list: list[str]) -> list[int]:
     Raises:
         ValueError: If any element is not a string or the key name is unknown.
     """
-    resolved_keycodes: list[int] = []  # Initialize list to hold resolved keycodes
+    resolved_keycodes = []  # Initialize list to hold resolved keycodes
 
     # Iterate over the incoming key names and resolve each to a keycode value
     for key_name in key_name_list:
@@ -132,7 +132,7 @@ def _resolve_keycodes_from_names(key_name_list: list[str]) -> list[int]:
             raise ValueError("All key names must be strings")
 
         # Lookup the keycode for this normalized key name
-        keycode_value: int | None = KEY_NAME_TO_KEYCODE_MAP.get(key_name.upper())
+        keycode_value = KEY_NAME_TO_KEYCODE_MAP.get(key_name.upper())
 
         # Validate that the key name was found in dictionary
         if keycode_value is None:
