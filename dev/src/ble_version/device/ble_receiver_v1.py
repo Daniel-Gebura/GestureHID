@@ -48,48 +48,54 @@ keyboard_layout = KeyboardLayoutUS(keyboard)  # Attach US layout to keyboard
 mouse = Mouse(usb_hid.devices)                # Create USB mouse HID object
 
 # 2. Create key mapping dictionary for resolving common key names to actual Keycode values
-KEY_NAME_TO_KEYCODE_MAP = {
-    # Letters a..z mapped to their uppercase Keycode equivalents
-    **{
-        chr(ascii_code): getattr(Keycode, chr(ascii_code).upper())
-        for ascii_code in range(ord("a"), ord("z") + 1)
-    },
-    # digits 0..9 (top row)
-    **{
-        str(digit): getattr(Keycode, f"NUMBER_{digit}")
-        for digit in range(10)
-    },
-    # whitespace & common keys
-    "SPACE": Keycode.SPACEBAR,
-    "TAB": Keycode.TAB,
-    "ENTER": Keycode.ENTER,
-    "RETURN": Keycode.ENTER,
-    "ESC": Keycode.ESCAPE,
-    "ESCAPE": Keycode.ESCAPE,
-    "BACKSPACE": Keycode.BACKSPACE,
-    "DELETE": Keycode.DELETE,
-    # arrows
-    "UP": Keycode.UP_ARROW,
-    "DOWN": Keycode.DOWN_ARROW,
-    "LEFT": Keycode.LEFT_ARROW,
-    "RIGHT": Keycode.RIGHT_ARROW,
-    # navigation
-    "HOME": Keycode.HOME,
-    "END": Keycode.END,
-    "PAGE_UP": Keycode.PAGE_UP,
-    "PAGE_DOWN": Keycode.PAGE_DOWN,
-    # modifiers
-    "CTRL": Keycode.CONTROL,
-    "CONTROL": Keycode.CONTROL,
-    "SHIFT": Keycode.SHIFT,
-    "ALT": Keycode.ALT,
-    "GUI": Keycode.GUI,  # Windows / Command key
-    # function keys F1..F24
-    **{
-        f"F{f_index}": getattr(Keycode, f"F{f_index}")
-        for f_index in range(1, 25)
-    },
-}
+KEY_NAME_TO_KEYCODE_MAP = {}
+
+# Letters a..z (accept both "a" and "A")
+for i in range(ord("a"), ord("z") + 1):
+    letter = chr(i)
+    KEY_NAME_TO_KEYCODE_MAP[letter] = getattr(Keycode, letter.upper())
+    KEY_NAME_TO_KEYCODE_MAP[letter.upper()] = getattr(Keycode, letter.upper())
+
+# Digits 0..9 (top row)
+KEY_NAME_TO_KEYCODE_MAP["0"] = Keycode.ZERO
+KEY_NAME_TO_KEYCODE_MAP["1"] = Keycode.ONE
+KEY_NAME_TO_KEYCODE_MAP["2"] = Keycode.TWO
+KEY_NAME_TO_KEYCODE_MAP["3"] = Keycode.THREE
+KEY_NAME_TO_KEYCODE_MAP["4"] = Keycode.FOUR
+KEY_NAME_TO_KEYCODE_MAP["5"] = Keycode.FIVE
+KEY_NAME_TO_KEYCODE_MAP["6"] = Keycode.SIX
+KEY_NAME_TO_KEYCODE_MAP["7"] = Keycode.SEVEN
+KEY_NAME_TO_KEYCODE_MAP["8"] = Keycode.EIGHT
+KEY_NAME_TO_KEYCODE_MAP["9"] = Keycode.NINE
+
+# Whitespace & common keys
+KEY_NAME_TO_KEYCODE_MAP["SPACE"] = Keycode.SPACEBAR
+KEY_NAME_TO_KEYCODE_MAP["TAB"] = Keycode.TAB
+KEY_NAME_TO_KEYCODE_MAP["ENTER"] = Keycode.ENTER
+KEY_NAME_TO_KEYCODE_MAP["RETURN"] = Keycode.ENTER
+KEY_NAME_TO_KEYCODE_MAP["ESC"] = Keycode.ESCAPE
+KEY_NAME_TO_KEYCODE_MAP["ESCAPE"] = Keycode.ESCAPE
+KEY_NAME_TO_KEYCODE_MAP["BACKSPACE"] = Keycode.BACKSPACE
+KEY_NAME_TO_KEYCODE_MAP["DELETE"] = Keycode.DELETE
+
+# Arrows
+KEY_NAME_TO_KEYCODE_MAP["UP"] = Keycode.UP_ARROW
+KEY_NAME_TO_KEYCODE_MAP["DOWN"] = Keycode.DOWN_ARROW
+KEY_NAME_TO_KEYCODE_MAP["LEFT"] = Keycode.LEFT_ARROW
+KEY_NAME_TO_KEYCODE_MAP["RIGHT"] = Keycode.RIGHT_ARROW
+
+# Navigation
+KEY_NAME_TO_KEYCODE_MAP["HOME"] = Keycode.HOME
+KEY_NAME_TO_KEYCODE_MAP["END"] = Keycode.END
+KEY_NAME_TO_KEYCODE_MAP["PAGE_UP"] = Keycode.PAGE_UP
+KEY_NAME_TO_KEYCODE_MAP["PAGE_DOWN"] = Keycode.PAGE_DOWN
+
+# Modifiers
+KEY_NAME_TO_KEYCODE_MAP["CTRL"] = Keycode.CONTROL
+KEY_NAME_TO_KEYCODE_MAP["CONTROL"] = Keycode.CONTROL
+KEY_NAME_TO_KEYCODE_MAP["SHIFT"] = Keycode.SHIFT
+KEY_NAME_TO_KEYCODE_MAP["ALT"] = Keycode.ALT
+KEY_NAME_TO_KEYCODE_MAP["GUI"] = Keycode.GUI
 
 # 3. Create mouse button mapping dictionary
 MOUSE_BUTTON_TO_BUTTON_VALUE_MAP = {
@@ -385,7 +391,7 @@ def _handle_mouse_command(cmd: dict) -> None:
         dx = _clamp(dx, MOUSE_DELTA_MIN, MOUSE_DELTA_MAX)
         dy = _clamp(dy, MOUSE_DELTA_MIN, MOUSE_DELTA_MAX)
         wheel = _clamp(wheel, MOUSE_DELTA_MIN, MOUSE_DELTA_MAX)
-        mouse.move(dx=dx, dy=dy, wheel=wheel)
+        mouse.move(dx, dy, wheel)
         return
 
     # Button Commands: Click, press, or release a button
