@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 ################################################################
-# host_sequence_sender.py
+# host_sequence_sender_v1.py
 #
 # Description:
 #   Windows/PC-side BLE "central" that connects to your nRF52840
